@@ -1,5 +1,6 @@
 
-python GraphTk1.py
+in console run :
+python GraphTK.py
 
 Clik and move points until having a drawing without line crossing
 
