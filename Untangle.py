@@ -2,7 +2,8 @@
 """
 from untangle
 """
-version = 'v0.3'
+
+version = 'v1.0'
 
 from __future__ import print_function, division
 
@@ -20,14 +21,15 @@ else : quit()
 from math import cos, sin, pi
 
 class Node:
-    def __init__(self, canvas, i, xy, xy0, r):
+    def __init__(self, canvas, xy, xy0, r, txt='*'):
         self.canvas = canvas
         self.r = r
+        self.txt = txt
         self.solved_x, self.solved_y = xy
         x, y = xy0
         self.x, self.y = x, y
-        self.id = self.canvas.create_oval(x-r, y-r, x+r, y+r, fill="blue", tags="node")
-        self.txtId = self.canvas.create_text(x, y, text=str(i), fill="yellow")
+        self.id = self.canvas.create_oval(x-r, y-r, x+r, y+r, fill="blue")
+        self.txtId = self.canvas.create_text(x, y, text=txt, fill="yellow")
         self.links = []
         
     def addLink(self, n, lnk):
@@ -50,17 +52,24 @@ class Node:
         #print("setPos x, y :", x, y)
         self.canvas.coords(self.id, x-self.r, y-self.r, x+self.r, y+self.r)
         self.canvas.coords(self.txtId, x, y)
+        
+    def updateLinks(self):
+        for lnk in self.links : 
+            lnk.updateNodes()
+    
+    def move_to_xy(self, x, y):
+        self.x = x
+        self.y = y
+        #print("move_to_xy :",self.x, self.y)
+        self.setPos(self.x, self.y)
+        self.updateLinks()
     
     def move_dxdy(self, dx, dy):
         self.x += dx
         self.y += dy
-        
-        #self.canvas.move(self.id   , dx, dy)
-        #self.canvas.move(self.txtId, dx, dy)
+        #print("move_dxdy :",self.x, self.y, dx, dy)
         self.setPos(self.x, self.y)
-        
-        for lnk in self.links : 
-            lnk.updateNodes()
+        self.updateLinks()
             
     def solve(self, k=1.0):
         '''
@@ -99,24 +108,34 @@ class GuiGame(TK.Frame):
     def __init__(self, parent):
         TK.Frame.__init__(self, parent)
         
+        self.parent = parent
+        
         self.showSolution = 0.0 # or 1.0
         self.solutionShownAt = 0.0 # from 0.0 (0%) to 1.0 (100%)
 
-        mainmenu = TK.Menu(parent) # Barre de menu
+        mainMenu = TK.Menu(self.parent) # Barre de menu
         
-        self.menuExample = TK.Menu(mainmenu)  # Menu fils menuExample 
-        self.menuExample.add_command(label="Show solution", command=self.showSolutionOnOff)  # Ajout d'une option au menu fils menuFile 
-        self.menuExample.add_separator() # Ajout d'une ligne separatrice 
-        self.menuExample.add_command(label="Quitter", command=parent.quit) 
+        self.menuFile = TK.Menu(mainMenu)  # Menu fils menuFile 
+        self.menuFile.add_command(label="Show solution", command=self.showSolutionOnOff)  # Ajout d'une option au menu fils menuFile 
+        self.menuFile.add_separator() # Ajout d'une ligne separatrice 
+        self.menuFile.add_command(label="Quitter", command=self.parent.quit) 
           
-        menuHelp = TK.Menu(mainmenu) # Menu Fils 
+        self.menuMove = TK.Menu(mainMenu)  # Menu fils menuMove 
+        self.menuMove.add_command(label="Up<->Down"   , command=self.flipUpDown)  # Ajout d'une option au menu fils menuMove 
+        self.menuMove.add_command(label="Left<->Right", command=self.flipLeftRight)  # Ajout d'une option au menu fils menuMove 
+        self.menuMove.add_command(label="Rotate180"   , command=self.Rotate180)  # Ajout d'une option au menu fils menuMove 
+        self.menuMove.add_command(label="RotateCW"    , command=self.RotateCW )  # Ajout d'une option au menu fils menuMove 
+        self.menuMove.add_command(label="RotateCCW"   , command=self.RotateCCW)  # Ajout d'une option au menu fils menuMove 
+          
+        menuHelp = TK.Menu(mainMenu) # Menu Fils 
         menuHelp.add_command(label="A propos", command=self.about) 
           
-        mainmenu.add_cascade(label = "Exemple", menu=self.menuExample) 
-        mainmenu.add_cascade(label = "Aide", menu=menuHelp) 
-        parent.config(menu = mainmenu) 
+        mainMenu.add_cascade(label = "File", menu=self.menuFile) 
+        mainMenu.add_cascade(label = "Moves", menu=self.menuMove) 
+        mainMenu.add_cascade(label = "Aide", menu=menuHelp) 
+        self.parent.config(menu = mainMenu) 
         
-        self.canvas = TK.Canvas(parent, width=CVW, height=CVH, bg='light yellow')
+        self.canvas = TK.Canvas(self.parent, width=CVW, height=CVH, bg='light yellow')
         self.canvas.pack()
         
         xs, ys = zip(*xys) # unzip
@@ -145,7 +164,7 @@ class GuiGame(TK.Frame):
             xy0pix = self.div2pix(xy0) # initial pos in circle
             xy_pix = self.div2pix(xy)  # solved pos
             print(i, xy_pix)
-            node = Node(self.canvas, i, xy_pix, xy0pix, rNode)
+            node = Node(self.canvas, xy_pix, xy0pix, rNode, str(i))
             self.itemIdToNode[node.id] = node
             self.nodes.append(node)
             
@@ -159,14 +178,102 @@ class GuiGame(TK.Frame):
             node0.addLink(0, lnk)
             node1.addLink(1, lnk)
             
-        self.mouseDown = False
+        self.shiftModifier = False
+        self.ctrlModifier  = False
+    
+        self.moveGroup = False
         self.mouseX, self.mouseY = 0, 0
-        self.nodesDragged = []
+        self.nodesSelected = []
         self.canvas.bind("<ButtonPress-1>"  , self.onMousePress)   # <Button-1>
         self.canvas.bind("<ButtonRelease-1>", self.onMouseRelease) # <Button-1>
         self.canvas.bind('<Motion>', self.onMouseMove)
+        if 1 :
+            self.parent.bind("<KeyPress-Shift_L>"  , self.onShiftPress) # <Key>
+            self.parent.bind("<KeyRelease-Shift_L>", self.onShiftRealease) # <Key>
         
+        if 1 :
+            self.parent.bind("<KeyPress-Control_L>"  , self.onCtrlPress) # <Key>
+            self.parent.bind("<KeyRelease-Control_L>", self.onCtrlRealease) # <Key>
+        
+        self.canvas.bind("<Button-3>", self.popup)
+
         self.periodicTask()
+
+    def popup(self, event):
+        #print("popup")
+        self.menuMove.post(event.x_root, event.y_root)
+
+    def flipUpDown(self):
+        print("flipUpDown")
+        xC, yC = self.groupCenter(self.nodesSelected)
+        
+        impactedLinks = set()
+        for node in self.nodesSelected:
+            x, y = node.getPos()
+            node.move_to_xy(x, yC-(y-yC))
+            impactedLinks |= set(node.links)
+            
+        for lnk in impactedLinks:
+            lnk.updateNodes()
+    
+    def flipLeftRight(self):
+        print("flipLeftRight")
+        xC, yC = self.groupCenter(self.nodesSelected)
+        
+        impactedLinks = set()
+        for node in self.nodesSelected:
+            x, y = node.getPos()
+            node.move_to_xy(xC-(x-xC), y)
+            impactedLinks |= set(node.links)
+            
+        for lnk in impactedLinks:
+            lnk.updateNodes()
+        
+    def Rotate180(self):
+        print("Rotate180")
+        xC, yC = self.groupCenter(self.nodesSelected)
+        
+        impactedLinks = set()
+        for node in self.nodesSelected:
+            x, y = node.getPos()
+            node.move_to_xy(xC-(x-xC), yC-(y-yC))
+            impactedLinks |= set(node.links)
+            
+        for lnk in impactedLinks:
+            lnk.updateNodes()
+        
+    def RotateCW(self):
+        print("RotateCW")
+        
+    def RotateCCW(self):
+        print("RotateCCW")
+        
+    def groupCenter(self, nodes):
+        n = len(nodes)
+        sumX, sumY = 0.0, 0.0
+        for node in nodes:
+            x, y = node.getPos()
+            sumX += node.x
+            sumY += node.y
+        return sumX/n, sumY/n   
+        
+    def onShiftPress(self, event):
+        if event.state == 9: return # ====>
+        #print("onShiftPress Keycode:", event.keycode, "State:", event.state)
+        self.shiftModifier = True
+        
+    def onShiftRealease(self, event):
+        #print("onShiftRealease Keycode:", event.keycode, "State:", event.state)
+        self.shiftModifier = False
+        
+    def onCtrlPress(self, event):
+        if event.state == 9: return # ====>
+        #print("onKeyPressed Keycode:", event.keycode, "State:", event.state)
+        self.ctrlModifier = True
+        
+    def onCtrlRealease(self, event):
+        #print("onKeyRealease Keycode:", event.keycode, "State:", event.state)
+        self.ctrlModifier = False
         
     def periodicTask(self):
         self.showSolutionPeriodic()
@@ -183,7 +290,7 @@ class GuiGame(TK.Frame):
             self.showSolution = 0.0
             label = "Show solution"
         print("showSolution :", self.showSolution)
-        self.menuExample.entryconfig(1, label=label)
+        self.menuFile.entryconfig(1, label=label)
         
     def showSolutionPeriodic(self):    
         dSol = self.showSolution - self.solutionShownAt 
@@ -209,54 +316,92 @@ class GuiGame(TK.Frame):
         yp = self.yCpix - int((y-self.yC) * self.pixsPerDiv)
         return xp, yp
     
+    def addNodesToSelection(self, nodes):
+        for node in nodes:
+            if node in self.nodesSelected:
+                node.setColor('blue')
+                self.nodesSelected.remove(node) # toggle
+            else:
+                node.setColor('red')
+                self.nodesSelected.append(node)
+    
+    def resetSelection(self):
+        for node in self.nodesSelected :
+            node.setColor('blue')
+        self.nodesSelected = []
+    
+    def findNodesAtXY(self, x, y):
+        e = 0
+        items = self.canvas.find_overlapping(x-e, y-e, x+e, y+e)
+        nodes = []
+        for item in items:
+            try :
+                node = self.itemIdToNode[item] # in node list ?
+            except :
+                continue
+            if node not in nodes :
+                nodes.append(node)
+        return nodes
+
+    def reselectGroup(self, nodes):
+        reselect = False
+        for node in nodes:
+            if node in self.nodesSelected : 
+                reselect = True 
+                break
+        #print("reselectGroup :", reselect)
+        return reselect
+        
     def onMousePress(self, event):
         if self.solutionShownAt > 0.0 : return # =========>
         
-        print("onMousePress :", event.x, event.y)
-        self.mouseDown = True
-        self.mouseX, self.mouseY = event.x, event.y
-        e = 0
-        items = self.canvas.find_overlapping(event.x-e, event.y-e, event.x+e, event.y+e)
-        print("items :", items)
-        
-        self.nodesDragged = []
-        for item in items:
-            tags = self.canvas.gettags(item)
-            print("item tags :", item, tags)
-            try :
-                node = self.itemIdToNode[item]
-                #print("node :", node)
-                self.nodesDragged.append(node)
-            except :
-                continue
-        print("self.nodesDragged :", self.nodesDragged)
-        
-        for node in self.nodesDragged :
-            node.setColor('red')
-
+        #print("\nonMousePress : x, y, shift, ctrl :", event.x, event.y, self.shiftModifier, self.ctrlModifier)
+        if self.shiftModifier :
+            self.rectStartXY = event.x, event.y
+        else:    
+            self.mouseX, self.mouseY = event.x, event.y
+            foundNodes = self.findNodesAtXY(event.x, event.y)
+            if len(foundNodes) == 0 :
+                print("no node found => resetSelection")
+                self.resetSelection()
+                return # =========>
+            if 1:
+                foundNodesNames = [n.txt for n in foundNodes]
+                print("nodes found :", foundNodesNames)
+                    
+            if self.ctrlModifier : 
+                self.addNodesToSelection(foundNodes)
+                return # =========>
+                
+            if self.reselectGroup(foundNodes):
+                self.moveGroup = True
+                return # =========>
+                
+            self.addNodesToSelection(foundNodes)
+            self.moveGroup = True
+            
     def onMouseMove(self, event):
         if self.solutionShownAt > 0.0 : return # =========>
         
-        if self.mouseDown:
+        if self.moveGroup:
             dx, dy = event.x - self.mouseX, event.y - self.mouseY 
             self.mouseX, self.mouseY = event.x, event.y
             #print("Mouse Down Move x, y, dx, dy :", event.x, event.y, dx, dy)
-            for node in self.nodesDragged :
+            for node in self.nodesSelected :
                 node.move_dxdy(dx, dy)
     
     def onMouseRelease(self, event):
         if self.solutionShownAt > 0.0 : return # =========>
+        if self.moveGroup :
+            self.moveGroup = False
+            dx, dy = event.x - self.mouseX, event.y - self.mouseY 
+            self.mouseX, self.mouseY = event.x, event.y
+            #print("Mouse Release x, y, dx, dy :", event.x, event.y, dx, dy)
+            for node in self.nodesSelected :
+                node.move_dxdy(dx, dy)
+            if len(self.nodesSelected) == 1 :
+                self.resetSelection()
         
-        self.mouseDown = False
-        dx, dy = event.x - self.mouseX, event.y - self.mouseY 
-        self.mouseX, self.mouseY = event.x, event.y
-        print("Mouse Release x, y, dx, dy :", event.x, event.y, dx, dy)
-        for node in self.nodesDragged :
-            node.move_dxdy(dx, dy)
-            node.setColor('blue')
-            #x, y = node.getPos()
-            #node.setPos(x=40, y=20)
-    
 #=================================================================
 
 if __name__ == "__main__":
