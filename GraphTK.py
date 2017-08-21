@@ -27,12 +27,16 @@ class Pixel:
     def __str__(self):
         return "Pix(%7.1f,%7.1f)"%(self.h, self.v)
         
-#--------------------------------------------------------        
+#--------------------------------------------------------
+
+NORMAL, SELECTED, PIVOT = 0, 1, 2 # _status values
+StatusColors = ('blue', 'red', 'green')
+        
 class NodeTk(LG.Node):
     def __init__(self, graph, id, pos, r_pix=12, name=None):
         self.r_pix = r_pix
         LG.Node.__init__(self, graph, id, pos, name)
-        print("NodeTk.name: '%s'"%self.name)
+        #print("NodeTk.name: '%s'"%self.name)
         
         self.canvas = self.graph.canvas
         
@@ -42,9 +46,16 @@ class NodeTk(LG.Node):
         h, v = self.pix.h, self.pix.v
         self.itemId = self.canvas.create_oval(h-r, v-r, h+r, v+r, fill='blue') #"light blue"
         self.txtId  = self.canvas.create_text(h, v, text=self.name, fill="yellow")
+        self._status = NORMAL
 
-    def setColor(self, color):
-        self.canvas.itemconfig(self.itemId, fill=color)
+    def setStatus(self, status=NORMAL):
+        if self._status == status : return # =========>
+        
+        self._status = status
+        self.canvas.itemconfig(self.itemId, fill=StatusColors[status])
+    
+    def getStatus(self):
+        return self._status
     
     def setPos(self, pos, updateLnk=True):
         #print("TK setPos x, y :", x, y)
@@ -98,7 +109,7 @@ class LinkTk(LG.Link):
 #------------------------------------------------------
 class GraphTk(LG.Graph):
     def __init__(self, canvas, id=0, name='', e=3, **kwargs):
-        if 1:
+        if 0:
             print("GraphTk kwargs :")
             for key in kwargs: print(key, ':', kwargs[key])
         self.canvas = canvas
@@ -124,7 +135,8 @@ class GraphTk(LG.Graph):
         rNode = 12
         self.centerPix = Pixel(CVW//2, CVH//2)
         pixPerDivX, pixPerDivY = (CVW-3*rNode)/self.drawingW, (CVH-3*rNode)/self.drawingH
-        self.pixsPerDiv = min(pixPerDivX, pixPerDivY) # keep aspect ratio
+        ppd = min(pixPerDivX, pixPerDivY) # keep aspect ratio
+        self.pixsPerDiv = float('%.2g'%ppd) # limitSignificantDigits
         print("pixsPerDiv :", self.pixsPerDiv)
         
     def div2pix(self, pos):
@@ -138,10 +150,8 @@ class GraphTk(LG.Graph):
         x  = self.centerPos.x + (pix.h - self.centerPix.h)/self.pixsPerDiv
         y  = self.centerPos.y - (pix.v - self.centerPix.v)/self.pixsPerDiv
         return LG.Position(x, y)
-            
-    def findNodesAtXY(self, x, y):
-        e = 0
-        items = self.canvas.find_overlapping(x-e, y-e, x+e, y+e)
+        
+    def findNodesAmong(self, items):
         nodes = []
         for item in items:
             try :
@@ -151,10 +161,37 @@ class GraphTk(LG.Graph):
             if node not in nodes :
                 nodes.append(node)
         return nodes
+        
+    def findNodesAtXY(self, x, y):
+        e = 0
+        items = self.canvas.find_overlapping(x-e, y-e, x+e, y+e)
+        return self.findNodesAmong(items)
     
+    def findEnclosedNodes(self, xys):
+        items = self.canvas.find_enclosed(*xys)
+        return self.findNodesAmong(items)
+        
 #------------------------------------------------------------
 
 CVW, CVH = 640, 480
+
+REMOVE, NOP, ADD, TOGGLE = -1, 0, 1, 2 # selectionMode
+
+PLAY, SHOW = 0, 1
+
+rotationHelpText = '''Use mouse wheel
+or move mouse while 'r' key pressed
+with 2 or more selected nodes (red)
+step of 5 deg
+
+To select node :
+while Ctrl-key pressed
+mouse left-click on nodes'''
+
+mirrorHelpText = '''Mirror needs exactly 2 pivot nodes(green) !
+To select / deselect pivot node :
+while Shilt-key pressed
+mouse left-click on nodes'''
 
 class GuiGame(TK.Frame):
     def __init__(self, parent):
@@ -162,31 +199,11 @@ class GuiGame(TK.Frame):
         
         self.parent = parent
         
-        self.showSolution = 0.0 # or 1.0
-        self.solutionShownAt = 0.0 # from 0.0 (0%) to 1.0 (100%)
-
-        mainMenu = TK.Menu(self.parent) # Barre de menu
+        self.dt_ms = 20 # periodic task
+        self.dinterpolation = 0.02001
+        self.interpolation_k = 0.0 # from 0.0 (0%) to 1.0 (100%)
         
-        self.menuFile = TK.Menu(mainMenu)  # Menu fils menuFile 
-        self.menuFile.add_command(label="Show solution", command=self.showSolutionOnOff)  # Ajout d'une option au menu fils menuFile 
-        self.menuFile.add_separator() # Ajout d'une ligne separatrice 
-        self.menuFile.add_command(label="Quitter", command=self.parent.quit) 
-          
-        self.menuMove = TK.Menu(mainMenu)  # Menu fils menuMove 
-        self.menuMove.add_command(label="Up<->Down"   , command=self.flipUpDown)  # Ajout d'une option au menu fils menuMove 
-        self.menuMove.add_command(label="Left<->Right", command=self.flipLeftRight)  # Ajout d'une option au menu fils menuMove 
-        self.menuMove.add_command(label="Rotate180"   , command=self.Rotate180)  # Ajout d'une option au menu fils menuMove 
-        self.menuMove.add_command(label="RotateCW"    , command=self.RotateCW )  # Ajout d'une option au menu fils menuMove 
-        self.menuMove.add_command(label="RotateCCW"   , command=self.RotateCCW)  # Ajout d'une option au menu fils menuMove 
-        self.menuMove.add_command(label="Mirror"      , command=self.Mirror   )  # Ajout d'une option au menu fils menuMove 
-          
-        menuHelp = TK.Menu(mainMenu) # Menu Fils 
-        menuHelp.add_command(label="A propos", command=self.about) 
-          
-        mainMenu.add_cascade(label = "File", menu=self.menuFile) 
-        mainMenu.add_cascade(label = "Moves", menu=self.menuMove) 
-        mainMenu.add_cascade(label = "Aide", menu=menuHelp) 
-        self.parent.config(menu = mainMenu) 
+        self.initMenus()
         
         self.canvas = TK.Canvas(self.parent, width=CVW, height=CVH, bg='light yellow')
         self.canvas.pack()
@@ -195,34 +212,115 @@ class GuiGame(TK.Frame):
                                 #initialPostions  =LG.sailBoatNodesPos, 
                                 solutionPositions=LG.sailBoatNodesPos, 
                                 linksNodes       =LG.sailBoatlinks )
-        
         self.shiftModifier = False
         self.ctrlModifier  = False
-    
-        self.moveGroup = False
-        self.mouseX, self.mouseY = 0, 0
-        self.nodesSelected = []
-        self.nodesMirror   = [] # 2 and only 2 are need to define the mirror line
+        self.RkeyModifier  = False
+        self.freeRotation  = False        
+        self.moveGroup     = False
+        self.selectionMode = NOP
         
+        self.mouseX, self.mouseY = 0, 0
+        self.selectionRect = None
+        self.nodesSelected = []
+        self.pivots   = [] # 2 and only 2 are need to define the mirror line
+        
+        self.initBindings()
+        
+        self.gameMode = PLAY
+        
+        self.periodicTask()
+
+    def periodicTask(self):
+        self.animateInterpolation()
+        self.after(self.dt_ms, self.periodicTask)
+
+    def initMenus(self):
+        mainMenu = TK.Menu(self.parent) # Barre de menu
+        
+        self.menuFile = TK.Menu(mainMenu)  # Menu fils menuFile 
+        self.menuFile.add_command(label="Show inital pos", command=self.showInitial )
+        self.menuFile.add_command(label="Show solution"  , command=self.showSolution) 
+        self.menuFile.add_command(label="Show current"   , command=self.showCurrent) 
+        self.menuFile.add_separator() # Ajout d'une ligne separatrice 
+        self.menuFile.add_command(label="Quitter", command=self.parent.quit) 
+          
+        self.menuMove = TK.Menu(mainMenu)  # Menu fils menuMove 
+        self.menuMove.add_command(label="Rotate Help" , command=self.RotateHelp) 
+        self.menuMove.add_command(label="Rotate +90"  , command=self.RotateCCW)  
+        self.menuMove.add_command(label="Rotate -90"  , command=self.RotateCW ) 
+        self.menuMove.add_command(label="Rotate 180"  , command=self.Rotate180) 
+        self.menuMove.add_command(label="Up<->Down"   , command=self.flipUpDown) 
+        self.menuMove.add_command(label="Left<->Right", command=self.flipLeftRight)
+        self.menuMove.add_command(label="Mirror"      , command=self.Mirror)  
+          
+        menuHelp = TK.Menu(mainMenu) # Menu Fils 
+        menuHelp.add_command(label="A propos", command=self.about) 
+          
+        mainMenu.add_cascade(label = "File", menu=self.menuFile) 
+        mainMenu.add_cascade(label = "Moves", menu=self.menuMove) 
+        mainMenu.add_cascade(label = "Aide", menu=menuHelp) 
+        self.parent.config(menu = mainMenu)
+        
+    def enableMoveMenu(self):
+        self.menuMove.entryconfig("Rotate +90"  , state="normal")
+        self.menuMove.entryconfig("Rotate -90"  , state="normal")
+        self.menuMove.entryconfig("Rotate 180"  , state="normal")
+        self.menuMove.entryconfig("Up<->Down"   , state="normal")
+        self.menuMove.entryconfig("Left<->Right", state="normal")
+        self.menuMove.entryconfig("Mirror"      , state="normal")
+
+    def disableMoveMenu(self):
+        self.menuMove.entryconfig("Rotate +90"  , state="disabled")
+        self.menuMove.entryconfig("Rotate -90"  , state="disabled")
+        self.menuMove.entryconfig("Rotate 180"  , state="disabled")
+        self.menuMove.entryconfig("Up<->Down"   , state="disabled")
+        self.menuMove.entryconfig("Left<->Right", state="disabled")
+        self.menuMove.entryconfig("Mirror"      , state="disabled")
+        
+    def initBindings(self):    
         self.canvas.bind("<ButtonPress-1>"  , self.onMousePress)   # <Button-1>
         self.canvas.bind("<ButtonRelease-1>", self.onMouseRelease) # <Button-1>
         self.canvas.bind('<Motion>', self.onMouseMove)
-        if 1 :
-            self.parent.bind("<KeyPress-Shift_L>"  , self.onShiftPress) # <Key>
-            self.parent.bind("<KeyRelease-Shift_L>", self.onShiftRealease) # <Key>
+        # with Windows OS
+        self.canvas.bind('<MouseWheel>', self.onMouseWheel)
+        '''
+        # with Linux OS
+        root.bind("<Button-4>", self.onMouseWheel)
+        root.bind("<Button-5>", self.onMouseWheel)
+        '''
+        self.parent.bind("<KeyPress-Shift_L>"  , self.onShiftPress) # <Key>
+        self.parent.bind("<KeyRelease-Shift_L>", self.onShiftRealease) # <Key>
+    
+        self.parent.bind("<KeyPress-Control_L>"  , self.onCtrlPress) # <Key>
+        self.parent.bind("<KeyRelease-Control_L>", self.onCtrlRealease) # <Key>
         
-        if 1 :
-            self.parent.bind("<KeyPress-Control_L>"  , self.onCtrlPress) # <Key>
-            self.parent.bind("<KeyRelease-Control_L>", self.onCtrlRealease) # <Key>
+        self.parent.bind("<KeyPress>"  , self.onKeyPress)    # <Key>
+        self.parent.bind("<KeyRelease>", self.onKeyRealease) # <Key>
         
         self.canvas.bind("<Button-3>", self.popup)
 
-        self.periodicTask()
+    def about(self):
+        print("Menu about")
 
     def popup(self, event):
-        #print("popup")
+        #link contextual menu to Move menu
         self.menuMove.post(event.x_root, event.y_root)
-
+        
+    #--------------------- keys related callbacks -------------------    
+    def onShiftPress   (self, event): self.shiftModifier = True
+    def onShiftRealease(self, event): self.shiftModifier = False
+    def onCtrlPress    (self, event): self.ctrlModifier  = True
+    def onCtrlRealease (self, event): self.ctrlModifier  = False
+        
+    def onKeyPress(self, event):
+        #print("onKeyPressed Keycode:", event.keycode, "State:", event.state)
+        if event.keycode == 82 : self.RkeyModifier = True
+        
+    def onKeyRealease(self, event):
+        #print("onKeyRealease Keycode:", event.keycode, "State:", event.state)
+        if event.keycode == 82 : self.RkeyModifier = False
+    
+    #--------------------- move related callbacks -------------------    
     def updateLinks(self, links):
         for lnk in links:
             lnk.updateNodes()
@@ -237,90 +335,102 @@ class GuiGame(TK.Frame):
         impactedLinks = LG.flip(self.nodesSelected, mode=LG.LEFT_RIGHT) #, centerPos=None
         self.updateLinks(impactedLinks)
         
-    def Rotate180(self):
-        print("Rotate180")
-        impactedLinks = LG.Rotate(self.nodesSelected, deg=180) #, rotCenterPos=None
-        self.updateLinks(impactedLinks)
+    def RotateHelp(self): tkMessageBox.showinfo("Rotate Help", rotationHelpText)
+                
+    def Rotate(self, deg=5):
+        if len(self.nodesSelected) >= 2 :
+            #print("Rotate %+d deg"%deg)
+            impactedLinks = LG.Rotate(self.nodesSelected, deg=deg) #, rotCenterPos=None
+            self.updateLinks(impactedLinks)
         
-    def RotateCW(self):
-        print("RotateCW")
-        impactedLinks = LG.Rotate(self.nodesSelected, deg=-90) #, rotCenterPos=None
-        self.updateLinks(impactedLinks)
-        
-    def RotateCCW(self):
-        print("RotateCCW")
-        impactedLinks = LG.Rotate(self.nodesSelected, deg=90) #, rotCenterPos=None
-        self.updateLinks(impactedLinks)
+    def Rotate180(self): self.Rotate(deg=180)
+    def RotateCW (self): self.Rotate(deg=-90)
+    def RotateCCW(self): self.Rotate(deg=+90)
         
     def Mirror(self):
-        if len(self.nodesMirror) != 2 :
-            print("Mirror needs exactly 2 mirror nodes(green) !")
+        if len(self.pivots) != 2 :
+            tkMessageBox.showwarning("Mirror", mirrorHelpText)
             return # ======>
-        impactedLinks = LG.mirror(self.nodesSelected, *self.nodesMirror)
+        impactedLinks = LG.mirror(self.nodesSelected, *self.pivots)
         self.updateLinks(impactedLinks)
+    
+    #----------------------------------    
+    def showSolution(self):
+        self.disableMoveMenu()
+        self.transitTo('posS')
         
-    def onShiftPress(self, event):
-        if event.state == 9: return # ====>
-        #print("onShiftPress Keycode:", event.keycode, "State:", event.state)
-        self.shiftModifier = True
+    def showInitial(self):
+        self.disableMoveMenu()
+        self.transitTo('posI')
         
-    def onShiftRealease(self, event):
-        #print("onShiftRealease Keycode:", event.keycode, "State:", event.state)
-        self.shiftModifier = False
+    def showCurrent(self):
+        self.enableMoveMenu()
+        self.transitTo('posA')
         
-    def onCtrlPress(self, event):
-        if event.state == 9: return # ====>
-        #print("onKeyPressed Keycode:", event.keycode, "State:", event.state)
-        self.ctrlModifier = True
-        
-    def onCtrlRealease(self, event):
-        #print("onKeyRealease Keycode:", event.keycode, "State:", event.state)
-        self.ctrlModifier = False
-        
-    def periodicTask(self):
-        self.showSolutionPeriodic()
-        self.after(20, self.periodicTask)
-
-    def about(self):
-        print("Menu about")
-
-    def showSolutionOnOff(self):
-        if self.showSolution == 0.0 : 
+    def transitTo(self, pos):
+        if self.gameMode == PLAY :
+            # save Play pos to posA
             self.graph.NodesCopyPos(fromPos='pos' , toPos='posA')
-            self.graph.NodesCopyPos(fromPos='posS', toPos='posB')
-            self.showSolution = 1.0
-            label = "Hide solution"
-        else : 
-            self.showSolution = 0.0
-            label = "Show solution"
-        print("showSolution :", self.showSolution)
-        self.menuFile.entryconfig(1, label=label)
+            self.gameMode = SHOW
+        self.targetPos = pos
+        print("transitTo targetPos :", self.targetPos)
         
-    def showSolutionPeriodic(self):    
-        dSol = self.showSolution - self.solutionShownAt 
-        if dSol == 0.0 : return # ========>
         
-        dmax = 0.02001 # 50 steps
-        if   dSol >  dmax : dSol =  dmax
-        elif dSol < -dmax : dSol = -dmax
-        self.solutionShownAt += dSol
-        #print("solutionShownAt :", self.solutionShownAt)
+    def animateInterpolation(self):    
+        if self.gameMode == PLAY : return # =======>
+        dk = 1.0 - self.interpolation_k 
+        if -1e-6 < dk < 1e-6 :
+            if self.targetPos == 'posA' : self.gameMode == PLAY # stop animation
+            return # ========>
+        # interpolation speed = dmax/self.period_ms
+        dmax = self.dinterpolation
+        if   dk >  dmax : dk =  dmax
+        elif dk < -dmax : dk = -dmax
+        self.interpolation_k += dk
+        #print("interpolation_k :", self.interpolation_k)
+        LG.morphing(self.graph.nodes, self.targetPos, self.interpolation_k)    
         
-        LG.morphing(self.graph.nodes, self.solutionShownAt)    
-            
-    def addNodesToSelection(self, nodes):
+    def removeNodeFromSelection(self, node):
+        node.setStatus(NORMAL)
+        self.nodesSelected.remove(node)
+        
+    def addNodeToSelection(self, node):
+        status = node.getStatus()
+        if status == SELECTED : return
+        if status == PIVOT :
+            self.removeNodeFromPivots(node)
+        node.setStatus(SELECTED)
+        self.nodesSelected.append(node)
+        
+    def removeNodeFromPivots(self, node):
+        node.setStatus(NORMAL)
+        self.pivots.remove(node)
+        
+    def addNodeToPivots(self, node):
+        status = node.getStatus()
+        if status == PIVOT : return
+        if status == SELECTED :
+            self.removeNodeFromSelection(node)
+        node.setStatus(PIVOT)
+        self.pivots.append(node)
+        
+    def addNodesToSelection(self, nodes, selectionMode=TOGGLE):
         for node in nodes:
             if node in self.nodesSelected:
-                node.setColor('blue')
-                self.nodesSelected.remove(node) # toggle
+                if selectionMode in (TOGGLE, REMOVE) :
+                    self.removeNodeFromSelection(node)
             else:
-                node.setColor('red')
-                self.nodesSelected.append(node)
+                if selectionMode in (TOGGLE, ADD) :
+                    self.addNodeToSelection(node)
     
     def resetSelection(self):
-        for node in self.nodesSelected :
-            node.setColor('blue')
-        self.nodesSelected = []
+        #for node in self.nodesSelected : self.removeNodeFromSelection(node) # BAD !!!!
+        for i in reversed(range(len(self.nodesSelected))) : self.removeNodeFromSelection(self.nodesSelected[i])
+        assert len(self.nodesSelected) == 0
+        
+    def resetPivots(self):
+        for i in reversed(range(len(self.pivots))) : self.removeNodeFromPivots(self.pivots[i])
+        assert len(self.pivots) == 0
         
     def reselectGroup(self, nodes):
         reselect = False
@@ -332,63 +442,115 @@ class GuiGame(TK.Frame):
         return reselect
         
     def onMousePress(self, event):
-        if self.solutionShownAt > 0.0 : return # =========>
+        if self.interpolation_k > 0.0 : return # =========>
         
         #print("\nonMousePress : x, y, shift, ctrl :", event.x, event.y, self.shiftModifier, self.ctrlModifier)
         self.mouseX, self.mouseY = event.x, event.y
         foundNodes = self.graph.findNodesAtXY(event.x, event.y)
         
+        if len(foundNodes) == 0 :
+            if self.ctrlModifier :
+                self.selectionMode = ADD
+                color='red'
+            elif self.shiftModifier : 
+                self.selectionMode = REMOVE
+                color='blue'
+            else :
+                self.selectionMode = NOP
+            print("selectionMode :", self.selectionMode)
+            if self.selectionMode in (ADD, REMOVE):
+                self.xy0SelectionRect = self.mouseX, self.mouseY
+                xys = self.mouseX, self.mouseY, self.mouseX, self.mouseY
+                self.selectionRect = self.canvas.create_rectangle(xys, width=2, fill='', dash=(1, 1), outline=color)
+            else:
+                print("no node found => reset Pivots and Selection")
+                self.resetSelection()
+                self.resetPivots()
+                return # =========>
+                
         if self.shiftModifier :
             if len(foundNodes) == 1 : # normal case
                 node = foundNodes[0]
-                if node in self.nodesMirror:
-                    node.setColor('blue')
-                    self.nodesMirror.remove(node) # toggle
+                if node in self.pivots:
+                    self.removeNodeFromPivots(node) # toggle
                 else:
-                    node.setColor('green')
-                    self.nodesMirror.append(node)
+                    self.addNodeToPivots(node)
             return # =========>
         else:    
-            if len(foundNodes) == 0 :
-                print("no node found => resetSelection")
-                self.resetSelection()
-                return # =========>
             if 1:
                 foundNodesNames = [n.name for n in foundNodes]
                 print("nodes found :", foundNodesNames)
                     
             if self.ctrlModifier : 
-                self.addNodesToSelection(foundNodes)
+                self.addNodesToSelection(foundNodes, selectionMode=TOGGLE)
                 return # =========>
                 
             if self.reselectGroup(foundNodes):
                 self.moveGroup = True
                 return # =========>
                 
-            self.addNodesToSelection(foundNodes)
+            self.addNodesToSelection(foundNodes, selectionMode=TOGGLE)
             self.moveGroup = True
-            
-    def onMouseMove(self, event):
-        if self.solutionShownAt > 0.0 : return # =========>
-        
-        if self.moveGroup:
-            dx, dy = event.x - self.mouseX, event.y - self.mouseY 
-            self.mouseX, self.mouseY = event.x, event.y
-            #print("Mouse Down Move x, y, dx, dy :", event.x, event.y, dx, dy)
-            for node in self.nodesSelected :
-                node.move_dhdv(dx, dy)
     
+    def moveNodesSelected_dhdv(self, dh, dv):
+        for node in self.nodesSelected :
+            node.move_dhdv(dh, dv)
+    
+    def onMouseMove(self, event):
+        if self.selectionRect :
+            x0, y0 = self.xy0SelectionRect
+            xys = x0, y0, event.x, event.y
+            self.canvas.coords(self.selectionRect, xys)
+            return # ============>
+        dx, dy = event.x - self.mouseX, event.y - self.mouseY 
+        self.mouseX, self.mouseY = event.x, event.y
+        if self.RkeyModifier : 
+            if dy != 0 :
+                self.Rotate(deg=dy)
+                return # =========>
+        if self.interpolation_k > 0.0 : return # =========>
+        #print("Mouse Move moveGroup :", self.moveGroup)
+        if self.moveGroup: self.moveNodesSelected_dhdv(dx, dy)
+
+    def onMouseWheel(self, event):
+        #print("Mouse Wheel event .x, .y, .num, .delta :", event.x, event.y, event.num, event.delta)
+        # respond to Linux or Windows wheel event
+        rotate = 0
+        if event.num == 5 or event.delta == -120:
+            rotate = -1
+        elif event.num == 4 or event.delta == 120:
+            rotate = +1
+        if rotate != 0 :
+            #print("Mouse Wheel rotate : %+d; moveGroup :"%rotate, self.moveGroup)
+            self.Rotate(deg=5*rotate)
+        
     def onMouseRelease(self, event):
-        if self.solutionShownAt > 0.0 : return # =========>
+        if self.interpolation_k > 0.0 : return # =========>
+        if self.selectionRect :
+            x0, y0 = self.xy0SelectionRect
+            xys = x0, y0, event.x, event.y
+            self.canvas.coords(self.selectionRect, xys)
+            color = None
+            if self.ctrlModifier and self.selectionMode != ADD:
+                self.selectionMode = ADD
+                color='red'
+            elif self.shiftModifier and self.selectionMode != REMOVE: 
+                self.selectionMode = REMOVE
+                color='blue'
+            if color : node.setOutline('blue')
+            enclosedNodes = self.graph.findEnclosedNodes(xys)
+            self.addNodesToSelection(enclosedNodes, selectionMode=self.selectionMode)
+            self.canvas.delete(self.selectionRect)
+            self.selectionRect = None
+            return # ============>
+            
         if self.moveGroup :
             self.moveGroup = False
             dx, dy = event.x - self.mouseX, event.y - self.mouseY 
             self.mouseX, self.mouseY = event.x, event.y
             #print("Mouse Release x, y, dx, dy :", event.x, event.y, dx, dy)
-            for node in self.nodesSelected :
-                node.move_dhdv(dx, dy)
-            if len(self.nodesSelected) == 1 :
-                self.resetSelection()
+            self.moveNodesSelected_dhdv(dx, dy)
+            if len(self.nodesSelected) == 1 : self.resetSelection() # one node selection is temporary
         
 #=================================================================
 

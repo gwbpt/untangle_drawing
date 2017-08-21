@@ -104,11 +104,12 @@ class Node:
         for lnk in self.links : 
             lnk.updateNodes()
             
-    def interpolatedPos(self, k=0.5):
-        if self.posA==None or self.posB==None : return None
-        
-        pA, pB = self.posA, self.posB
-        dx, dy = pB.x-pA.x, pB.y-pA.y
+    def interpolatedPos(self, targetPos, k=0.5):
+        #print("targetPos :", targetPos)
+        posT = getattr(self, targetPos)
+        if self.posA==None or posT==None : return None
+        pA, pT = self.posA, posT
+        dx, dy = pT.x-pA.x, pT.y-pA.y
         return Position(pA.x + k*dx, pA.y + k*dy)
     
 #----------------------------------------------------------            
@@ -179,7 +180,7 @@ def mirror(nodes, nodeM1, nodeM2): # nodes M1 and M2 define the mirror line
         
 def Rotate(nodes, deg=90, rotCenterPos=None):
     a = deg * DEG2RAD
-    print("Rotate %6.1f"%deg)
+    #print("Rotate %6.1f"%deg)
     
     if rotCenterPos == None :
         rotCenterPos = groupCenterPos(nodes)
@@ -198,10 +199,11 @@ def Rotate(nodes, deg=90, rotCenterPos=None):
         
     return impactedLinks
     
-def morphing(nodes, k=0.5):    
+def morphing(nodes, targetPos, k=0.5):    
+    #print("morphing targetPos :", targetPos)
     impactedLinks = set()
     for node in nodes:
-        pos = node.interpolatedPos(k)
+        pos = node.interpolatedPos(targetPos, k)
         if pos : 
             node.setPos(pos, updateLnk=False)
             impactedLinks |= set(node.links)
