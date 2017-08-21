@@ -41,7 +41,7 @@ class NodeTk(LG.Node):
         
         r = self.r_pix
         x, y = self.pix.x, self.pix.y
-        self.itemId = self.canvas.create_oval(x-r, y-r, x+r, y+r, fill='blue') #"light blue"
+        self.itemId = self.canvas.create_oval(x-r, y-r, x+r, y+r, fill='blue', outline='') #"light blue"
         self.txtId  = self.canvas.create_text(x, y, text=self.name, fill="yellow")
         self._status = NORMAL
     
@@ -57,10 +57,9 @@ class NodeTk(LG.Node):
     
     def getStatus(self):
         return self._status
-    
-    def setPos(self, pos, updateLnk=True):
-        #print("TK setPos x, y :", x, y)
-        LG.Node.setPos(self, pos)
+        
+    def updatePos(self, updateLnk=False):
+        #print("TK updatePos")
         self.setPix(self.graph.div2pix(self.pos), updateLnk=updateLnk)
         
     def setPix(self, pix, updateLnk=True):
@@ -118,7 +117,7 @@ class GraphTk(LG.Graph):
         self.itemIdToNode = dict()
         LG.Graph.__init__(self, id=id, name=name, **kwargs) # id=0, name='', nodes=None, links=None
         
-    def createAndAddNode(self, i, xy, r_pix=12, name=None):
+    def createAndAddNode(self, i, xy, r_pix=10, name=None):
         #print("TK.createAndAddNode")
         node = NodeTk(self, i, xy, name=name, r_pix=r_pix)
         self.itemIdToNode[node.itemId] = node
@@ -207,8 +206,8 @@ class GuiGame(TK.Frame):
         
         self.graph = GraphTk(   self.canvas, 
                                 #initialPostions  =LG.sailBoatNodesPos, 
-                                solutionPositions=LG.sailBoatNodesPos, 
-                                linksNodes       =LG.sailBoatlinks )
+                                solutionPositions=LG.busNodesPos, # LG.sailBoatNodesPos
+                                linksNodes       =LG.buslinks )   # LG.sailBoatlinks
         self.shiftModifier = False
         self.ctrlModifier  = False
         self.RkeyModifier  = False
@@ -227,11 +226,15 @@ class GuiGame(TK.Frame):
         
         self.nbSteps = 100 # 
         self.dt_ms   = 20 # transition time = nbSteps * dt_ms
-        self.periodicTask()
+        self.periodicTasks = list()
+        self.periodicLoop()
 
-    def periodicTask(self):
+    def periodicLoop(self):
         self.animateInterpolation()
-        self.after(self.dt_ms, self.periodicTask)
+        for periodicTask in tuple(self.periodicTasks):
+            if periodicTask():
+                self.periodicTasks.remove(periodicTask)
+        self.after(self.dt_ms, self.periodicLoop)
 
     def initMenus(self):
         mainMenu = TK.Menu(self.parent) # Barre de menu
@@ -383,13 +386,21 @@ class GuiGame(TK.Frame):
     def Rotate(self, deg=5):
         if len(self.nodesSelected) >= 2 :
             #print("Rotate %+d deg"%deg)
-            impactedLinks = LG.Rotate(self.nodesSelected, deg=deg) #, rotCenterPos=None
-            self.updateLinks(impactedLinks)
+            if 0 :
+                impactedLinks = LG.Rotate(self.nodesSelected, deg=deg) #, rotCenterPos=None
+                self.updateLinks(impactedLinks)
+            else:
+                softRot = LG.SoftRotation(self.nodesSelected, deg=deg, nbSteps=1) # 1 step => hard rot
+                softRot.rotate_da() # one step
         
-    def Rotate180(self): self.Rotate(deg=180)
-    def RotateCW (self): self.Rotate(deg=-90)
-    def RotateCCW(self): self.Rotate(deg=+90)
+    def Rotate180(self): self.RotateSoft(deg=180)
+    def RotateCW (self): self.RotateSoft(deg=-90)
+    def RotateCCW(self): self.RotateSoft(deg=+90)
         
+    def RotateSoft(self, deg=90): 
+        self.softRot = LG.SoftRotation(self.nodesSelected, deg=deg, nbSteps=self.nbSteps)
+        self.periodicTasks.append(self.softRot.rotate_da)
+    
     def Mirror(self):
         if len(self.pivots) != 2 :
             tkMessageBox.showwarning("Mirror", mirrorHelpText)

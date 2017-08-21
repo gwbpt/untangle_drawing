@@ -61,6 +61,14 @@ class Vect2D:
     def __rmul__(self, other):
         return self.__mul__(other)
         
+    def rotate(self, cosa, sina, xC=0.0, yC=0.0):
+        xrel, yrel = self.x-xC, self.y-yC
+        self.x = cosa * xrel - sina * yrel + xC
+        self.y = sina * xrel + cosa * yrel + yC
+        
+    def copy(self):
+        return self.__class__(self.x, self.y)
+        
     def __str__(self):
         return self.strFormat%(self.x, self.y)
         
@@ -80,11 +88,13 @@ class Node:
     def __init__(self, graph, id, pos, name=None):
         self.graph = graph
         self.id    = id
-        if name: self.name = name
-        else   : self.name = chr(ord('A')+id)
+        if   name == 'alpha': self.name = chr(ord('A')+id)
+        elif name == 'num'  : self.name = str(id)
+        elif name == None   : self.name = str(id)
+        else                : self.name = name
         #print(self.name)
         self.pos  = pos  # current position
-        self.posList     = [pos]  # 0 = Initial  pos
+        self.posList = [pos.copy()] # or[Position(pos.x, pos.y)]  # copy pos
         self.posList.append(None) # 1 = solution pos if any
         self.posList.append(None) # 2 = to store current pos
         self.links = []
@@ -98,10 +108,13 @@ class Node:
     def getPos(self):
         return self.pos
         
-    def setPos(self, pos, updateLnk=False):
-        self.pos = pos
+    def updatePos(self, updateLnk=False):
         if updateLnk:
             self.updateLinks()
+    
+    def setPos(self, pos, updateLnk=False):
+        self.pos = pos
+        self.updatePos(updateLnk=updateLnk)
         
     def setSelect(self, selected=True):
         self.selected = selected
@@ -137,6 +150,9 @@ class Link:
         return "%3d :%3d <->%3d; '%s'"%(self.id, self.node0.id, self.node1.id, self.name)
     
 #----------------------------------------------------------
+            
+def updateLinks(links): 
+    for lnk in links: lnk.updateNodes()
            
 def groupCenterPos(nodes):
     n = len(nodes)
@@ -189,27 +205,8 @@ def mirror(nodes, nodeM1, nodeM2): # nodes M1 and M2 define the mirror line
         impactedLinks |= set(node.links)
         
     return impactedLinks
-        
-def Rotate(nodes, deg=90, rotCenterPos=None):
-    a = deg * DEG2RAD
-    #print("Rotate %6.1f"%deg)
-    
-    if rotCenterPos == None :
-        rotCenterPos = groupCenterPos(nodes)
-    cp = rotCenterPos
-    
-    c, s = cos(a), sin(a)
-    
-    impactedLinks = set()
-    for node in nodes:
-        np = node.pos
-        xrel, yrel = np.x-cp.x, np.y-cp.y
-        x = c * xrel - s * yrel 
-        y = s * xrel + c * yrel 
-        node.setPos(Position(cp.x + x, cp.y + y))
-        impactedLinks |= set(node.links)
-        
-    return impactedLinks
+
+
     
 def calculateStepToTargetNodes(nodes, targetIdx=SOL_POS_IDX, nbSteps=10):    
     #print("calculateStepsToTarget targetIdx :", targetIdx)
@@ -224,12 +221,12 @@ def executeStepToTargetForNodes(nodes, last=False):
         node.executeStepToTarget(updateLnk=False, last=last)
     
 #------------------------------------------------------------       
-def circularXYs(n, r, centerXY):
+def circularXYs(n, rx, ry, centerXY):
     xC, yC = centerXY
     xys = []
     da = (2*pi) / n
     for i in range(n):
-        xys.append((xC + r*cos(i*da), yC + r*sin(i*da)))
+        xys.append((xC + rx*cos(i*da), yC + ry*sin(i*da)))
     return xys
                 
 #------------------------------------------------------------       
@@ -278,6 +275,48 @@ def restoreNodesPosFrom(nodes, fromIdx=STORE_POS_IDX):
     for node in self.nodes:
         node.pos = Position(node.posList[fromIdx].x, nodeA.posList[idx].y)
                  
+#---------------------------------------------------------------
+class SoftRotation:     
+    def __init__(self, nodes, deg=90, rotCenterPos=None, nbSteps=10):   
+        self.nodes = nodes
+        
+        if rotCenterPos == None :
+            rotCenterPos = groupCenterPos(self.nodes)
+
+        self.xC, self.yC = rotCenterPos.x, rotCenterPos.y
+        
+        a = deg * DEG2RAD
+        self.cosa, self.sina = cos(a), sin(a)
+        
+        self.impactedLinks = set()
+        self.lastNodesPos = list()
+        for node in self.nodes:
+            self.impactedLinks |= set(node.links)
+            pos = Position(node.pos.x, node.pos.y)
+            pos.rotate(self.cosa, self.sina, xC=self.xC, yC=self.yC)
+            self.lastNodesPos.append(pos)
+        
+        da = a / nbSteps
+        self.cosda, self.sinda = cos(da), sin(da)
+        
+        self.stepCnt = 0
+        self.nbSteps = nbSteps # to start
+            
+    def rotate_da(self):
+        self.stepCnt += 1
+        last = self.stepCnt >= self.nbSteps
+        if last :
+            print("last")
+            for node, pos in zip(self.nodes,self.lastNodesPos):
+                node.setPos(pos)
+            self.nbSteps = 0 
+        else:
+            for node in self.nodes:
+                node.pos.rotate(self.cosda, self.sinda, xC=self.xC, yC=self.yC)
+                node.updatePos() 
+        updateLinks(self.impactedLinks)
+        return last # to stop
+        
 #------------------------------------------------------------       
 class Graph:
     def __init__(self, id=0, name='', **kwargs): # nodes=None, links=None
@@ -312,12 +351,11 @@ class Graph:
             else:
                 xC, yC = self.centerPos.x, self.centerPos.y
             
-            if 'radius' in kwargs:
-                radius = kwargs['radius']
-            else:
-                radius = 0.5 * min(self.drawingW, self.drawingH)
+            rx, ry = 0.5 * self.drawingW, 0.5 * self.drawingH
             
-            initialPostions = circularXYs(self.nodesN, radius, centerXY=(xC, yC))
+            xys = circularXYs(self.nodesN, rx, ry, centerXY=(xC, yC))
+            random.shuffle(xys)
+            initialPostions = xys
             
         if self.drawingW == None :    
             self.drawingW, self.drawingH, self.centerPos = widthHeightCenter(initialPostions)
@@ -360,9 +398,9 @@ class Graph:
         self.nodes.append(node)
         return node
         
-    def createAndAddLink(self, i, node0, node1):
+    def createAndAddLink(self, i, node0, node1, name=None):
         #print("LG.createAndAddLink")
-        link = Link(self, i, node0, node1)
+        link = Link(self, i, node0, node1, name=name)
         self.links.append(link)
         return link
         
@@ -373,6 +411,17 @@ class Graph:
 #--------------------------------------- sample ----------------------------------------            
 sailBoatNodesPos = ((-4.0, 0.0), (0.0, 0.0), (6.0, 0.0), (-2.0, -1.0), (5.0, -1.0), (0.0, 10.0), (-1.0, 1.0), (0.0, 1.0), (5.0, 1.0), (0.0, 8.0))      
 sailBoatlinks    = ((0, 1), (1, 2), (3, 4), (0, 3), (2, 4), (0, 9), (5, 9), (9, 7), (7, 1), (7, 8), (8, 5), (0, 6), (6, 9), (6, 1))     
+
+# ( 9, 4), ( 6, 4), ( 3, 4), (0, 4), (-3, 4), (-6, 4), (-9, 4), (-12, 4)
+busNodesPos = ( (-12, 7), (-9, 7), (-6, 7), (-3, 7), (0, 7), ( 3, 7), ( 6, 7), ( 9, 7), ( 11, 7), ( 12, 4),
+                ( 12, 1), ( 9, 1), ( 8, 0), ( 7, 0), (6, 1), (-6, 1), (-7, 0), (-8, 0), (-9, 1), (-12, 1), (-12, 4),
+                ( 9, 2), ( 8, 3), ( 7, 3), ( 6, 2), (-6, 2), (-7, 3), (-8, 3), (-9, 2),
+                ( 9, 4), ( 6, 4), ( 3, 4), ( 0, 4), (-3, 4), (-6, 4), (-9, 4), )      
+buslinks    = ( (0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10), 
+                (10, 11), (11, 12), (12, 13), (13, 14), (14, 15), (15, 16), (16, 17), (17, 18), (18, 19), (19, 20), (20, 0),
+                (11, 21), (21, 22), (22, 23), (23, 24), (24, 14), (15, 25), (25, 26), (26, 27), (27, 28), (28, 18),
+                (9, 29), (29, 30), (30, 31), (31, 32), (32, 33), (33, 34), (34, 35), (35, 20), 
+                (7, 29), (6, 30), (5, 31), (4, 32), (3, 33), (2, 34), (1, 35), )     
 
 #=======================================================================================
 
@@ -388,7 +437,7 @@ if __name__ == "__main__":
         print("p2 :", 3*p2)
         
         quit()
-    if 1:    
+    if 0:    
         node = Node(graph=None, id=0, pos=Position(0,0)) 
         node.posList[SOL_POS_IDX] = Position(2, 1) # solution
         
@@ -399,6 +448,16 @@ if __name__ == "__main__":
             node.executeStepToTarget()
             print(node)
             
+        quit()
+        
+    if 1:    
+        node = Node(graph=None, id=0, pos=Position(1,0))
+        nodes = [node]
+        n = 10
+        softRot = SoftRotation(nodes, deg=180, rotCenterPos=Position(0,0), nbSteps=n)
+        for i in range(n):
+            softRot.rotate_da()
+            print("%3d : %s"%(i, node))
         quit()
         
     g = Graph(initialPostions=sailBoatNodesPos, linksNodes=sailBoatlinks)
