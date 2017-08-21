@@ -32,6 +32,7 @@ if 0:
     print("%s"% float('%.3g'%f))
     quit()
 
+#--------------------------------------------------
 import random
 from math import cos, sin, pi
 
@@ -41,14 +42,15 @@ from numbers import Number
 
 class Vect2D:
     def __init__(self, x, y):
-        self.x = x
-        self.y = y
+        self.x = float(x)
+        self.y = float(y)
+        self.strFormat = "Vec(%7.2f,%7.2f)" # "Vec(%9.4f,%9.4f)"
 
     def __add__(self, other):
-        return Vect2D(self.x+other.x, self.y+other.y)
+        return self.__class__(self.x+other.x, self.y+other.y)
         
     def __sub__(self, other):
-        return Vect2D(self.x-other.x, self.y-other.y)
+        return self.__class__(self.x-other.x, self.y-other.y)
         
     def __mul__(self, other):
         if isinstance(other, Number):
@@ -60,17 +62,20 @@ class Vect2D:
         return self.__mul__(other)
         
     def __str__(self):
-        return "Vec(%7.2f,%7.2f)"%(self.x, self.y)
+        return self.strFormat%(self.x, self.y)
         
 #---------------------------------
 class Position(Vect2D):
     def __init__(self, x, y):
         Vect2D.__init__(self, x,y)
-        
+        self.strFormat = "Pos(%9.4f,%9.4f)"
+    '''    
     def __str__(self):
         return "Pos(%7.2f,%7.2f)"%(self.x, self.y)
-        
-#--------------------------------------------------        
+    '''    
+#--------------------------------------------------
+INIT_POS_IDX, SOL_POS_IDX, STORE_POS_IDX = 0, 1, 2
+  
 class Node:
     def __init__(self, graph, id, pos, name=None):
         self.graph = graph
@@ -79,20 +84,24 @@ class Node:
         else   : self.name = chr(ord('A')+id)
         #print(self.name)
         self.pos  = pos  # current position
-        self.posI = pos  # Initial
-        self.posS = None # solution
-        self.posA = None # Start interpolate
-        self.posB = None # End   interpolate
+        self.posList     = [pos]  # 0 = Initial  pos
+        self.posList.append(None) # 1 = solution pos if any
+        self.posList.append(None) # 2 = to store current pos
         self.links = []
         
     def __str__(self):
-        return "%3d :%s; '%s'"%(self.id, self.pos, self.name)
+        posListStr = ""
+        for p in self.posList:
+            posListStr += "%s, "%p
+        return "%3d :%s; %s; '%s'"%(self.id, self.pos, posListStr, self.name)
     
     def getPos(self):
         return self.pos
         
-    def setPos(self, pos):
+    def setPos(self, pos, updateLnk=False):
         self.pos = pos
+        if updateLnk:
+            self.updateLinks()
         
     def setSelect(self, selected=True):
         self.selected = selected
@@ -104,14 +113,17 @@ class Node:
         for lnk in self.links : 
             lnk.updateNodes()
             
-    def interpolatedPos(self, targetPos, k=0.5):
+    def calculateStepToTarget(self, targetIdx=SOL_POS_IDX, nbSteps=10):
+        dk = 1.0/nbSteps
+        self.targetPos = self.posList[targetIdx]
         #print("targetPos :", targetPos)
-        posT = getattr(self, targetPos)
-        if self.posA==None or posT==None : return None
-        pA, pT = self.posA, posT
-        dx, dy = pT.x-pA.x, pT.y-pA.y
-        return Position(pA.x + k*dx, pA.y + k*dy)
+        dx, dy = (self.targetPos.x - self.pos.x) * dk , (self.targetPos.y - self.pos.y) * dk
+        self.stepToTarget = Vect2D(dx, dy)
     
+    def executeStepToTarget(self, updateLnk=True, last=False):
+        if last : self.setPos(self.targetPos)
+        else    : self.setPos(self.getPos() + self.stepToTarget, updateLnk=updateLnk)
+        
 #----------------------------------------------------------            
 class Link:
     def __init__(self, graph, id, node0, node1, name=None):
@@ -199,16 +211,18 @@ def Rotate(nodes, deg=90, rotCenterPos=None):
         
     return impactedLinks
     
-def morphing(nodes, targetPos, k=0.5):    
-    #print("morphing targetPos :", targetPos)
+def calculateStepToTargetNodes(nodes, targetIdx=SOL_POS_IDX, nbSteps=10):    
+    #print("calculateStepsToTarget targetIdx :", targetIdx)
     impactedLinks = set()
     for node in nodes:
-        pos = node.interpolatedPos(targetPos, k)
-        if pos : 
-            node.setPos(pos, updateLnk=False)
-            impactedLinks |= set(node.links)
+        node.calculateStepToTarget(targetIdx=targetIdx, nbSteps=nbSteps)
+        impactedLinks |= set(node.links)
     return impactedLinks
-            
+    
+def executeStepToTargetForNodes(nodes, last=False):
+    for node in nodes:
+        node.executeStepToTarget(updateLnk=False, last=last)
+    
 #------------------------------------------------------------       
 def circularXYs(n, r, centerXY):
     xC, yC = centerXY
@@ -252,6 +266,18 @@ def widthHeightCenter(xys):
 
     return width, height, centerPos
             
+#------------------------------------------------------------
+       
+def saveNodesPosTo(nodes, toIdx=STORE_POS_IDX):
+    print("saveNodesPosTo", toIdx)
+    for node in nodes:
+        node.posList[toIdx] = Position(node.pos.x, node.pos.y)
+        
+def restoreNodesPosFrom(nodes, fromIdx=STORE_POS_IDX):
+    print("restoreNodesPosFrom", toIdx)
+    for node in self.nodes:
+        node.pos = Position(node.posList[fromIdx].x, nodeA.posList[idx].y)
+                 
 #------------------------------------------------------------       
 class Graph:
     def __init__(self, id=0, name='', **kwargs): # nodes=None, links=None
@@ -299,7 +325,7 @@ class Graph:
         for i, (x, y) in enumerate(initialPostions):
             self.createAndAddNode(i, Position(x, y))
             
-        if solutionPositions : self.loadSolutionXYs(solutionPositions)    
+        if solutionPositions : self.load_xys_in_idx(xys=solutionPositions, idx=SOL_POS_IDX)    
     
         if 'linksNodes' in kwargs:
             linksNodes = kwargs['linksNodes']
@@ -340,22 +366,9 @@ class Graph:
         self.links.append(link)
         return link
         
-    def loadSolutionXYs(self, xys):
+    def load_xys_in_idx(self, xys, idx):
         for node, (x, y) in zip(self.nodes, xys):
-            node.posS = Position(x, y)
-            
-    def saveNodesPosInPosA(self):
-        for node in self.nodes:
-            node.posA = Position(node.pos.x, node.pos.y)
-            
-    def restoreNodesPosfromPosA(self):
-        for node in self.nodes:
-            node.pos = Position(node.posA.x, nodeA.pos.y)
-            
-    def NodesCopyPos(self, fromPos='posS', toPos='posA'):
-        print("NodesCopyPos", fromPos, toPos)
-        for node in self.nodes:
-            setattr(node, toPos, getattr(node, fromPos))
+            node.posList[idx] = Position(x, y)
             
 #--------------------------------------- sample ----------------------------------------            
 sailBoatNodesPos = ((-4.0, 0.0), (0.0, 0.0), (6.0, 0.0), (-2.0, -1.0), (5.0, -1.0), (0.0, 10.0), (-1.0, 1.0), (0.0, 1.0), (5.0, 1.0), (0.0, 8.0))      
@@ -374,6 +387,18 @@ if __name__ == "__main__":
         p2 = Position(2,3)
         print("p2 :", 3*p2)
         
+        quit()
+    if 1:    
+        node = Node(graph=None, id=0, pos=Position(0,0)) 
+        node.posList[SOL_POS_IDX] = Position(2, 1) # solution
+        
+        n = 10
+        node.calculateStepToTarget(targetIdx=SOL_POS_IDX, nbSteps=n)
+        print(node)
+        for i in range(n):
+            node.executeStepToTarget()
+            print(node)
+            
         quit()
         
     g = Graph(initialPostions=sailBoatNodesPos, linksNodes=sailBoatlinks)

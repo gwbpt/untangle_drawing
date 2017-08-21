@@ -19,13 +19,10 @@ else : quit()
 import GraphLogic as LG
 
 
-class Pixel:
-    def __init__(self, h, v):
-        self.h = h
-        self.v = v
-
-    def __str__(self):
-        return "Pix(%7.1f,%7.1f)"%(self.h, self.v)
+class Pixel(LG.Vect2D):
+    def __init__(self, x, y):
+        LG.Vect2D.__init__(self, x,y)
+        self.strFormat = "Pos(%7.1f,%7.1f)"
         
 #--------------------------------------------------------
 
@@ -43,11 +40,15 @@ class NodeTk(LG.Node):
         self.pix = self.graph.div2pix(self.pos)
         
         r = self.r_pix
-        h, v = self.pix.h, self.pix.v
-        self.itemId = self.canvas.create_oval(h-r, v-r, h+r, v+r, fill='blue') #"light blue"
-        self.txtId  = self.canvas.create_text(h, v, text=self.name, fill="yellow")
+        x, y = self.pix.x, self.pix.y
+        self.itemId = self.canvas.create_oval(x-r, y-r, x+r, y+r, fill='blue') #"light blue"
+        self.txtId  = self.canvas.create_text(x, y, text=self.name, fill="yellow")
         self._status = NORMAL
-
+    
+    def __str__(self):
+        s = LG.Node.__str__(self) + "; %s"%self.pix
+        return s
+    
     def setStatus(self, status=NORMAL):
         if self._status == status : return # =========>
         
@@ -69,17 +70,17 @@ class NodeTk(LG.Node):
         self.draw(updateLnk=True)
         
     def move_dhdv(self, dh, dv):
-        self.pix.h += dh
-        self.pix.v += dv
+        self.pix.x += dh
+        self.pix.y += dv
         #print("move_dhdv :", dh, dv, self.pix)
         self.pos = self.graph.pix2div(self.pix)
         
         self.draw(updateLnk=True)
         
     def draw(self, updateLnk=True):
-        h, v, r = self.pix.h, self.pix.v, self.r_pix
-        self.canvas.coords(self.itemId, h-r, v-r, h+r, v+r)
-        self.canvas.coords(self.txtId, h, v)
+        x, y, r = self.pix.x, self.pix.y, self.r_pix
+        self.canvas.coords(self.itemId, x-r, y-r, x+r, y+r)
+        self.canvas.coords(self.txtId, x, y)
         
         if updateLnk : self.updateLinks()
         
@@ -99,7 +100,7 @@ class LinkTk(LG.Link):
     def updateNodes(self):
         pix0 = self.node0.pix 
         pix1 = self.node1.pix 
-        xys = pix0.h, pix0.v, pix1.h, pix1.v
+        xys = pix0.x, pix0.y, pix1.x, pix1.y
         if self.itemId == None :
             self.itemId = self.canvas.create_line(xys, width=3, tags="link")
             self.canvas.tag_lower(self.itemId)
@@ -141,14 +142,14 @@ class GraphTk(LG.Graph):
         
     def div2pix(self, pos):
         if not hasattr(self, 'pixsPerDiv'): self.scaleAndCenter()
-        h = self.centerPix.h + int((pos.x-self.centerPos.x) * self.pixsPerDiv)
-        v = self.centerPix.v - int((pos.y-self.centerPos.y) * self.pixsPerDiv)
-        return Pixel(h, v)
+        x = self.centerPix.x + int((pos.x-self.centerPos.x) * self.pixsPerDiv)
+        y = self.centerPix.y - int((pos.y-self.centerPos.y) * self.pixsPerDiv)
+        return Pixel(x, y)
             
     def pix2div(self, pix):
         #if not hasattr(self, 'pixsPerDiv'): self.scaleAndCenter()
-        x  = self.centerPos.x + (pix.h - self.centerPix.h)/self.pixsPerDiv
-        y  = self.centerPos.y - (pix.v - self.centerPix.v)/self.pixsPerDiv
+        x  = self.centerPos.x + (pix.x - self.centerPix.x)/self.pixsPerDiv
+        y  = self.centerPos.y - (pix.y - self.centerPix.y)/self.pixsPerDiv
         return LG.Position(x, y)
         
     def findNodesAmong(self, items):
@@ -199,10 +200,6 @@ class GuiGame(TK.Frame):
         
         self.parent = parent
         
-        self.dt_ms = 20 # periodic task
-        self.dinterpolation = 0.02001
-        self.interpolation_k = 0.0 # from 0.0 (0%) to 1.0 (100%)
-        
         self.initMenus()
         
         self.canvas = TK.Canvas(self.parent, width=CVW, height=CVH, bg='light yellow')
@@ -228,6 +225,8 @@ class GuiGame(TK.Frame):
         
         self.gameMode = PLAY
         
+        self.nbSteps = 100 # 
+        self.dt_ms   = 20 # transition time = nbSteps * dt_ms
         self.periodicTask()
 
     def periodicTask(self):
@@ -241,6 +240,10 @@ class GuiGame(TK.Frame):
         self.menuFile.add_command(label="Show inital pos", command=self.showInitial )
         self.menuFile.add_command(label="Show solution"  , command=self.showSolution) 
         self.menuFile.add_command(label="Show current"   , command=self.showCurrent) 
+        self.menuFile.add_separator() # Ajout d'une ligne separatrice 
+        self.menuFile.add_command(label="Print info"     , command=self.printInfo) 
+        self.menuFile.add_separator() # Ajout d'une ligne separatrice 
+        self.menuFile.add_command(label="Test"           , command=self.test) 
         self.menuFile.add_separator() # Ajout d'une ligne separatrice 
         self.menuFile.add_command(label="Quitter", command=self.parent.quit) 
           
@@ -299,9 +302,49 @@ class GuiGame(TK.Frame):
         
         self.canvas.bind("<Button-3>", self.popup)
 
+    #---------------------------------------------------------------
+    
+    def test(self):
+        for i in range(3):
+            print("Solution.y :", self.graph.nodes[i].posList[LG.SOL_POS_IDX].y)
+        for i in range(3):
+            print("Pos.y      :", self.graph.nodes[i].pos.y)
+    
+    def info(self):
+        s = "info:"
+        for node in self.graph.nodes:
+            s += "\n    %3d :%s; %s; '%s'"%(node.id, node.pos, node.pix, node.name)
+        return s
+    
     def about(self):
         print("Menu about")
-
+        dialog = TK.Toplevel(self) #, width=320, height=240
+        
+        dialog.title("Help")
+        if 0:
+            TK.Label(dialog, text="Rotation").pack()
+            wt = TK.Text(dialog, height=8, width=60)
+            wt.insert(TK.END, rotationHelpText)
+            wt.pack()
+            
+            TK.Label(dialog, text="Mirror").pack()
+            wt = TK.Text(dialog, height=8, width=60)
+            wt.insert(TK.END, mirrorHelpText)
+            wt.pack()
+        else:
+            sb = TK.Scrollbar(dialog)
+            tw = TK.Text(dialog, height=12, width=60)
+            sb.pack(side=TK.RIGHT, fill=TK.Y)
+            tw.pack(side=TK.LEFT, fill=TK.Y)
+            sb.config(command=tw.yview)
+            tw.config(yscrollcommand=sb.set)
+            tw.insert(TK.END, rotationHelpText)
+            tw.insert(TK.END, mirrorHelpText)
+            
+    def printInfo(self):
+        print("\ngraph info :", self.graph)
+        #print("\n" + self.info())
+    
     def popup(self, event):
         #link contextual menu to Move menu
         self.menuMove.post(event.x_root, event.y_root)
@@ -355,40 +398,38 @@ class GuiGame(TK.Frame):
         self.updateLinks(impactedLinks)
     
     #----------------------------------    
+    
     def showSolution(self):
         self.disableMoveMenu()
-        self.transitTo('posS')
+        self.transitTo(targetIdx=LG.SOL_POS_IDX)
         
     def showInitial(self):
         self.disableMoveMenu()
-        self.transitTo('posI')
+        self.transitTo(targetIdx=LG.INIT_POS_IDX)
         
     def showCurrent(self):
         self.enableMoveMenu()
-        self.transitTo('posA')
+        self.transitTo(targetIdx=LG.STORE_POS_IDX)
         
-    def transitTo(self, pos):
+    def transitTo(self, targetIdx):
+        print("transitTo targetIdx, self.nbSteps :", targetIdx, self.nbSteps)
         if self.gameMode == PLAY :
             # save Play pos to posA
-            self.graph.NodesCopyPos(fromPos='pos' , toPos='posA')
+            LG.saveNodesPosTo(self.graph.nodes, toIdx=LG.STORE_POS_IDX)
             self.gameMode = SHOW
-        self.targetPos = pos
-        print("transitTo targetPos :", self.targetPos)
-        
+        self.targetIdx = targetIdx
+        self.stepCnt = 0
+        self.impactedLinks = LG.calculateStepToTargetNodes(self.graph.nodes, targetIdx=targetIdx, nbSteps=self.nbSteps)
         
     def animateInterpolation(self):    
         if self.gameMode == PLAY : return # =======>
-        dk = 1.0 - self.interpolation_k 
-        if -1e-6 < dk < 1e-6 :
-            if self.targetPos == 'posA' : self.gameMode == PLAY # stop animation
-            return # ========>
-        # interpolation speed = dmax/self.period_ms
-        dmax = self.dinterpolation
-        if   dk >  dmax : dk =  dmax
-        elif dk < -dmax : dk = -dmax
-        self.interpolation_k += dk
-        #print("interpolation_k :", self.interpolation_k)
-        LG.morphing(self.graph.nodes, self.targetPos, self.interpolation_k)    
+        self.stepCnt += 1
+        last = self.stepCnt >= self.nbSteps
+        LG.executeStepToTargetForNodes(self.graph.nodes, last=last)
+        self.updateLinks(self.impactedLinks)
+        if last and self.targetIdx == LG.STORE_POS_IDX : 
+            self.gameMode = PLAY
+            print("gameMode <= PLAY")
         
     def removeNodeFromSelection(self, node):
         node.setStatus(NORMAL)
@@ -442,8 +483,7 @@ class GuiGame(TK.Frame):
         return reselect
         
     def onMousePress(self, event):
-        if self.interpolation_k > 0.0 : return # =========>
-        
+        if self.gameMode != PLAY : return # =========>
         #print("\nonMousePress : x, y, shift, ctrl :", event.x, event.y, self.shiftModifier, self.ctrlModifier)
         self.mouseX, self.mouseY = event.x, event.y
         foundNodes = self.graph.findNodesAtXY(event.x, event.y)
@@ -508,7 +548,7 @@ class GuiGame(TK.Frame):
             if dy != 0 :
                 self.Rotate(deg=dy)
                 return # =========>
-        if self.interpolation_k > 0.0 : return # =========>
+        if self.gameMode != PLAY : return # =========>
         #print("Mouse Move moveGroup :", self.moveGroup)
         if self.moveGroup: self.moveNodesSelected_dhdv(dx, dy)
 
@@ -525,7 +565,7 @@ class GuiGame(TK.Frame):
             self.Rotate(deg=5*rotate)
         
     def onMouseRelease(self, event):
-        if self.interpolation_k > 0.0 : return # =========>
+        if self.gameMode != PLAY : return # =========>
         if self.selectionRect :
             x0, y0 = self.xy0SelectionRect
             xys = x0, y0, event.x, event.y
