@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 """
-from untangle
+GWB
 """
 
 from __future__ import print_function, division
+
+version = 'v3.5'
 
 import sys
 print(sys.version_info)
@@ -43,6 +45,7 @@ class NodeTk(LG.Node):
         x, y = self.pix.x, self.pix.y
         self.itemId = self.canvas.create_oval(x-r, y-r, x+r, y+r, fill='blue', outline='') #"light blue"
         self.txtId  = self.canvas.create_text(x, y, text=self.name, fill="yellow")
+        self.graph.itemIdToNode[self.itemId] = self # register itself in graph dict
         self._status = NORMAL
     
     def __str__(self):
@@ -89,9 +92,11 @@ class NodeTk(LG.Node):
                         
 #---------------------------------------------        
 class LinkTk(LG.Link):
-    def __init__(self, graph, id, node0, node1, name=None, e=3):
+    def __init__(self, graph, id, node0, node1, name=None):
+        #print("LinkTk")
         LG.Link.__init__(self, graph, id, node0, node1, name=name)
-        self.canvas = self.graph.canvas
+        self.canvas        = self.graph.canvas
+        self.lineThickness = self.graph.lineThickness
         #self.node0, self.node1 = node0, node1
         self.itemId = None
         self.updateNodes()
@@ -101,46 +106,46 @@ class LinkTk(LG.Link):
         pix1 = self.node1.pix 
         xys = pix0.x, pix0.y, pix1.x, pix1.y
         if self.itemId == None :
-            self.itemId = self.canvas.create_line(xys, width=3, tags="link")
+            self.itemId = self.canvas.create_line(xys, width=self.lineThickness, tags="link")
             self.canvas.tag_lower(self.itemId)
         else :
             self.canvas.coords(self.itemId, xys)
             
 #------------------------------------------------------
 class GraphTk(LG.Graph):
-    def __init__(self, canvas, id=0, name='', e=3, **kwargs):
+    def __init__(self, canvas, id=0, name='', lineThickness=None, **kwargs):
         if 0:
             print("GraphTk kwargs :")
             for key in kwargs: print(key, ':', kwargs[key])
+            print("---------------------")
         self.canvas = canvas
-        self.e = e
         self.itemIdToNode = dict()
-        LG.Graph.__init__(self, id=id, name=name, **kwargs) # id=0, name='', nodes=None, links=None
+        self.lineThickness = lineThickness
         
-    def createAndAddNode(self, i, xy, r_pix=10, name=None):
-        #print("TK.createAndAddNode")
-        node = NodeTk(self, i, xy, name=name, r_pix=r_pix)
-        self.itemIdToNode[node.itemId] = node
-        self.nodes.append(node)
-        return node
+        LG.Graph.__init__(self, id=id, name=name, nodeClass=NodeTk, linkClass=LinkTk, **kwargs) # id=0, name='', nodes=None, links=None
         
-    def createAndAddLink(self, i, node0, node1, name=None, e=3):
-        #print("TK.createAndAddLink")
-        link = LinkTk(self, i, node0, node1, name=name, e=e)
-        self.links.append(link)
-        return link
-        
-    def scaleAndCenter(self):
+    def geomSetting(self, drawingW, drawingH):    
+        if self.lineThickness == None :
+            n = self.linksN
+            if   n <= 20: self.lineThickness = 5
+            elif n <= 25: self.lineThickness = 4
+            elif n <= 33: self.lineThickness = 3
+            elif n <= 50: self.lineThickness = 2
+            else        : self.lineThickness = 1
+            
         print("scaleAndCenter")
         rNode = 12
         self.centerPix = Pixel(CVW//2, CVH//2)
-        pixPerDivX, pixPerDivY = (CVW-3*rNode)/self.drawingW, (CVH-3*rNode)/self.drawingH
+        w, h = CVW-3*rNode, CVH-3*rNode
+        pixPerDivX, pixPerDivY = w/drawingW, h/drawingH
         ppd = min(pixPerDivX, pixPerDivY) # keep aspect ratio
         self.pixsPerDiv = float('%.2g'%ppd) # limitSignificantDigits
         print("pixsPerDiv :", self.pixsPerDiv)
-        
+        displayDivSize = w / self.pixsPerDiv, h / self.pixsPerDiv
+        return w/self.pixsPerDiv, h/self.pixsPerDiv
+       
     def div2pix(self, pos):
-        if not hasattr(self, 'pixsPerDiv'): self.scaleAndCenter()
+        #if not hasattr(self, 'pixsPerDiv'): self.scaleAndCenter()
         x = self.centerPix.x + int((pos.x-self.centerPos.x) * self.pixsPerDiv)
         y = self.centerPix.y - int((pos.y-self.centerPos.y) * self.pixsPerDiv)
         return Pixel(x, y)
@@ -194,20 +199,19 @@ while Shilt-key pressed
 mouse left-click on nodes'''
 
 class GuiGame(TK.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, solutionPositions=None, linksNodes=None, initialPostions=None, n=None):
         TK.Frame.__init__(self, parent)
         
         self.parent = parent
+        
+        self.noSolutionProvided = (solutionPositions == None) 
         
         self.initMenus()
         
         self.canvas = TK.Canvas(self.parent, width=CVW, height=CVH, bg='light yellow')
         self.canvas.pack()
         
-        self.graph = GraphTk(   self.canvas, 
-                                #initialPostions  =LG.sailBoatNodesPos, 
-                                solutionPositions=LG.busNodesPos, # LG.sailBoatNodesPos
-                                linksNodes       =LG.buslinks )   # LG.sailBoatlinks
+        self.graph = GraphTk( self.canvas, solutionPositions=solutionPositions, linksNodes=linksNodes, initialPostions=initialPostions, n=n )
         self.shiftModifier = False
         self.ctrlModifier  = False
         self.RkeyModifier  = False
@@ -237,52 +241,47 @@ class GuiGame(TK.Frame):
         self.after(self.dt_ms, self.periodicLoop)
 
     def initMenus(self):
-        mainMenu = TK.Menu(self.parent) # Barre de menu
+        mainMenu = TK.Menu(self.parent)
         
-        self.menuFile = TK.Menu(mainMenu)  # Menu fils menuFile 
+        self.menuFile = TK.Menu(mainMenu)
         self.menuFile.add_command(label="Show inital pos", command=self.showInitial )
-        self.menuFile.add_command(label="Show solution"  , command=self.showSolution) 
+        self.menuFile.add_command(label="Show solution"  , command=self.showSolution)
+        if self.noSolutionProvided: self.menuFile.entryconfig("Show solution", state="disabled")
         self.menuFile.add_command(label="Show current"   , command=self.showCurrent) 
-        self.menuFile.add_separator() # Ajout d'une ligne separatrice 
+        self.menuFile.add_separator() 
         self.menuFile.add_command(label="Print info"     , command=self.printInfo) 
-        self.menuFile.add_separator() # Ajout d'une ligne separatrice 
+        self.menuFile.add_separator()
         self.menuFile.add_command(label="Test"           , command=self.test) 
-        self.menuFile.add_separator() # Ajout d'une ligne separatrice 
+        self.menuFile.add_separator() 
         self.menuFile.add_command(label="Quitter", command=self.parent.quit) 
           
-        self.menuMove = TK.Menu(mainMenu)  # Menu fils menuMove 
+        self.menuMove = TK.Menu(mainMenu)  
         self.menuMove.add_command(label="Rotate Help" , command=self.RotateHelp) 
-        self.menuMove.add_command(label="Rotate +90"  , command=self.RotateCCW)  
-        self.menuMove.add_command(label="Rotate -90"  , command=self.RotateCW ) 
-        self.menuMove.add_command(label="Rotate 180"  , command=self.Rotate180) 
-        self.menuMove.add_command(label="Up<->Down"   , command=self.flipUpDown) 
-        self.menuMove.add_command(label="Left<->Right", command=self.flipLeftRight)
-        self.menuMove.add_command(label="Mirror"      , command=self.Mirror)  
+        self.MoveMenuLabelCmds = (  ("Rotate +90"  , self.RotateCCW    ),  
+                                    ("Rotate -90"  , self.RotateCW     ), 
+                                    ("Rotate 180"  , self.Rotate180    ), 
+                                    ("Up<->Down"   , self.flipUpDown   ), 
+                                    ("Left<->Right", self.flipLeftRight),
+                                    ("Mirror"      , self.Mirror       ),  ) 
+        for label, cmd in self.MoveMenuLabelCmds :
+            self.menuMove.add_command(label=label, command=cmd)
+            
+        menuHelp = TK.Menu(mainMenu)
+        menuHelp.add_command(label = "About", command=self.about) 
           
-        menuHelp = TK.Menu(mainMenu) # Menu Fils 
-        menuHelp.add_command(label="A propos", command=self.about) 
-          
-        mainMenu.add_cascade(label = "File", menu=self.menuFile) 
+        mainMenu.add_cascade(label = "File" , menu=self.menuFile) 
         mainMenu.add_cascade(label = "Moves", menu=self.menuMove) 
-        mainMenu.add_cascade(label = "Aide", menu=menuHelp) 
+        mainMenu.add_cascade(label = "Aide" , menu=menuHelp) 
         self.parent.config(menu = mainMenu)
         
-    def enableMoveMenu(self):
-        self.menuMove.entryconfig("Rotate +90"  , state="normal")
-        self.menuMove.entryconfig("Rotate -90"  , state="normal")
-        self.menuMove.entryconfig("Rotate 180"  , state="normal")
-        self.menuMove.entryconfig("Up<->Down"   , state="normal")
-        self.menuMove.entryconfig("Left<->Right", state="normal")
-        self.menuMove.entryconfig("Mirror"      , state="normal")
-
-    def disableMoveMenu(self):
-        self.menuMove.entryconfig("Rotate +90"  , state="disabled")
-        self.menuMove.entryconfig("Rotate -90"  , state="disabled")
-        self.menuMove.entryconfig("Rotate 180"  , state="disabled")
-        self.menuMove.entryconfig("Up<->Down"   , state="disabled")
-        self.menuMove.entryconfig("Left<->Right", state="disabled")
-        self.menuMove.entryconfig("Mirror"      , state="disabled")
-        
+    def moveMenuChangeState(self, state):
+        for label, cmd in self.MoveMenuLabelCmds :
+            self.menuMove.entryconfig(label, state=state)
+            
+    def enableMoveMenu (self): self.moveMenuChangeState("normal"  )
+    def disableMoveMenu(self): self.moveMenuChangeState("disabled")
+    
+    #-----------------------------        
     def initBindings(self):    
         self.canvas.bind("<ButtonPress-1>"  , self.onMousePress)   # <Button-1>
         self.canvas.bind("<ButtonRelease-1>", self.onMouseRelease) # <Button-1>
@@ -294,14 +293,14 @@ class GuiGame(TK.Frame):
         root.bind("<Button-4>", self.onMouseWheel)
         root.bind("<Button-5>", self.onMouseWheel)
         '''
-        self.parent.bind("<KeyPress-Shift_L>"  , self.onShiftPress) # <Key>
-        self.parent.bind("<KeyRelease-Shift_L>", self.onShiftRealease) # <Key>
+        self.parent.bind("<KeyPress-Shift_L>"  , self.onShiftPress) 
+        self.parent.bind("<KeyRelease-Shift_L>", self.onShiftRealease)
     
-        self.parent.bind("<KeyPress-Control_L>"  , self.onCtrlPress) # <Key>
-        self.parent.bind("<KeyRelease-Control_L>", self.onCtrlRealease) # <Key>
+        self.parent.bind("<KeyPress-Control_L>"  , self.onCtrlPress)
+        self.parent.bind("<KeyRelease-Control_L>", self.onCtrlRealease)
         
-        self.parent.bind("<KeyPress>"  , self.onKeyPress)    # <Key>
-        self.parent.bind("<KeyRelease>", self.onKeyRealease) # <Key>
+        self.parent.bind("<KeyPress>"  , self.onKeyPress)
+        self.parent.bind("<KeyRelease>", self.onKeyRealease)
         
         self.canvas.bind("<Button-3>", self.popup)
 
@@ -530,7 +529,7 @@ class GuiGame(TK.Frame):
         else:    
             if 1:
                 foundNodesNames = [n.name for n in foundNodes]
-                print("nodes found :", foundNodesNames)
+                #print("nodes found :", foundNodesNames)
                     
             if self.ctrlModifier : 
                 self.addNodesToSelection(foundNodes, selectionMode=TOGGLE)
@@ -566,11 +565,11 @@ class GuiGame(TK.Frame):
     def onMouseWheel(self, event):
         #print("Mouse Wheel event .x, .y, .num, .delta :", event.x, event.y, event.num, event.delta)
         # respond to Linux or Windows wheel event
-        rotate = 0
-        if event.num == 5 or event.delta == -120:
-            rotate = -1
-        elif event.num == 4 or event.delta == 120:
-            rotate = +1
+        
+        if   event.num == 5 or event.delta == -120: rotate = -1
+        elif event.num == 4 or event.delta ==  120: rotate = +1
+        else                                      : rotate =  0
+        
         if rotate != 0 :
             #print("Mouse Wheel rotate : %+d; moveGroup :"%rotate, self.moveGroup)
             self.Rotate(deg=5*rotate)
@@ -603,11 +602,16 @@ class GuiGame(TK.Frame):
             self.moveNodesSelected_dhdv(dx, dy)
             if len(self.nodesSelected) == 1 : self.resetSelection() # one node selection is temporary
         
-#=================================================================
+#==========================================================================================
 
 if __name__ == "__main__":
     root = TK.Tk()
-    root.title(__file__)
-    guiGame = GuiGame(root)
+    root.title('untangle_drawing ' + version)
+    
+    solutionPositions, linksNodes, initialPostions, n = LG.sailBoatNodesPos, LG.sailBoatlinks, None, None
+    #solutionPositions, linksNodes, initialPostions, n = LG.busNodesPos     , LG.buslinks, None, None
+    #solutionPositions, linksNodes, initialPostions, n = LG.sailBoatNodesPos, None, None, None
+    #solutionPositions, linksNodes, initialPostions, n = None, None, None, 12
+    guiGame = GuiGame(root, solutionPositions=solutionPositions, linksNodes=linksNodes, initialPostions=initialPostions, n=n )
     
     root.mainloop()

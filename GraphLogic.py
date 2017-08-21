@@ -93,7 +93,7 @@ class Node:
         elif name == None   : self.name = str(id)
         else                : self.name = name
         #print(self.name)
-        self.pos  = pos  # current position
+        self.pos  = pos  # current clickRangePli
         self.posList = [pos.copy()] # or[Position(pos.x, pos.y)]  # copy pos
         self.posList.append(None) # 1 = solution pos if any
         self.posList.append(None) # 2 = to store current pos
@@ -129,7 +129,6 @@ class Node:
     def calculateStepToTarget(self, targetIdx=SOL_POS_IDX, nbSteps=10):
         dk = 1.0/nbSteps
         self.targetPos = self.posList[targetIdx]
-        #print("targetPos :", targetPos)
         dx, dy = (self.targetPos.x - self.pos.x) * dk , (self.targetPos.y - self.pos.y) * dk
         self.stepToTarget = Vect2D(dx, dy)
     
@@ -183,7 +182,7 @@ def flip(nodes, centerPos=None, mode=UP_DOWN):
     return impactedLinks
     
 def mirror(nodes, nodeM1, nodeM2): # nodes M1 and M2 define the mirror line
-    print("Miror", nodeM1, nodeM2)
+    #print("Miror", nodeM1, nodeM2)
     
     posA = nodeM1.pos
     posB = nodeM2.pos
@@ -206,8 +205,7 @@ def mirror(nodes, nodeM1, nodeM2): # nodes M1 and M2 define the mirror line
         
     return impactedLinks
 
-
-    
+#------------------------------------------------------------       
 def calculateStepToTargetNodes(nodes, targetIdx=SOL_POS_IDX, nbSteps=10):    
     #print("calculateStepsToTarget targetIdx :", targetIdx)
     impactedLinks = set()
@@ -231,7 +229,7 @@ def circularXYs(n, rx, ry, centerXY):
                 
 #------------------------------------------------------------       
 def randomLinks(n):
-    print("randomLinks")
+    print("randomLinks :", n)
     links = set()
     scrambledNodesIds = list(range(n))
     random.shuffle(scrambledNodesIds)
@@ -249,8 +247,10 @@ def randomLinks(n):
     return list(links)
     
 #------------------------------------------------------------       
-def widthHeightCenter(xys):
-    print("LG.widthHeightCenter")
+def nWidthHeightCenter(xys):
+    #print("LG.nWidthHeightCenter")
+    n = len(xys)
+
     xs, ys = zip(*xys) # unzip
     
     xmin, xmax = min(xs), max(xs)
@@ -258,10 +258,8 @@ def widthHeightCenter(xys):
     
     width, height = xmax-xmin, ymax-ymin
     centerPos = Position(0.5*(xmin+xmax), 0.5*(ymin+ymax)) # center of drawing
-    print("drawing Width Height:", width, height)
-    print("drawing Center :", centerPos)
 
-    return width, height, centerPos
+    return n, width, height, centerPos
             
 #------------------------------------------------------------
        
@@ -319,59 +317,75 @@ class SoftRotation:
         
 #------------------------------------------------------------       
 class Graph:
-    def __init__(self, id=0, name='', **kwargs): # nodes=None, links=None
+    def __init__(self, id=0, name='', nodeClass=Node, linkClass=Link, **kwargs): # nodes=None, links=None
         if 0:
             print("LG.Graph kwargs :")
             for key in kwargs: print(key, ':', kwargs[key])
+            print("---------------------")
         self.id    = id
         self.name  = name
+        self.nodeClass = nodeClass
         self.nodes = []
+        self.linkClass = linkClass
         self.links = []
-        self.nodesN = None
-        self.drawingW, self.drawingH, self.centerPos = None, None, None
-        '''
-        if nodes : self.createNodes(initialPostions=nodes)
-        if links : self.createLinks(linksNodes=links)
-        '''
-        if 'solutionPositions' in kwargs:
-            solutionPositions = kwargs['solutionPositions']
-            self.nodesN = len(solutionPositions)
-            self.drawingW, self.drawingH, self.centerPos = widthHeightCenter(solutionPositions)
-        else:
-            solutionPositions = None
+        self.nodesN, self.drawingW, self.drawingH, self.centerPos = None, None, None, None
+        
+        solutionPositions = kwargs.get('solutionPositions', None)
+        initialPostions   = kwargs.get('initialPostions'  , None)
+        linksNodes        = kwargs.get('linksNodes'       , None)
+        
+        if 0:
+            print("solutionPositions :", solutionPositions)
+            print("initialPostions   :", initialPostions)
+            print("linksNodes        :", linksNodes)
+        
+        if solutionPositions :
+            self.nodesN, self.drawingW, self.drawingH, self.centerPos = nWidthHeightCenter(solutionPositions)
     
-        if 'initialPostions' in kwargs:
-            initialPostions = kwargs['initialPostions']
-        else:
-            if 'n' in kwargs:
-                self.nodesN = kwargs['n']
-                
-            if 'centerPos' in kwargs:
-                xC, yC = kwargs['centerPos']
+        if initialPostions:
+            initialPosAuto = False
+            if self.nodesN == None :
+                self.nodesN, self.drawingW, self.drawingH, self.centerPos = nWidthHeightCenter(initialPostions)
             else:
-                xC, yC = self.centerPos.x, self.centerPos.y
+                if len(initialPostionsN) != self.nodesN :
+                    print("initialPostions nb != solutionPositions nb => skip initialPostions")
+        else:
+            initialPosAuto = True
+            if self.nodesN == None : 
+                self.nodesN = kwargs.get('n', 7)
+                self.centerPos = kwargs.get('centerPos', Position(0, 0))
+                self.drawingW, self.drawingH = 2.0, 2.0
             
-            rx, ry = 0.5 * self.drawingW, 0.5 * self.drawingH
-            
+        if linksNodes == None :
+            linksNodes = randomLinks(self.nodesN)
+        self.linksN = len(linksNodes)
+        
+        self.displayDivSize = self.geomSetting(self.drawingW, self.drawingH)
+        
+        if initialPosAuto:
+            w, h = self.displayDivSize
+            rx, ry = 0.5*w, 0.5*h
+            xC, yC = self.centerPos.x, self.centerPos.y
             xys = circularXYs(self.nodesN, rx, ry, centerXY=(xC, yC))
             random.shuffle(xys)
             initialPostions = xys
             
-        if self.drawingW == None :    
-            self.drawingW, self.drawingH, self.centerPos = widthHeightCenter(initialPostions)
-               
-        for i, (x, y) in enumerate(initialPostions):
-            self.createAndAddNode(i, Position(x, y))
-            
-        if solutionPositions : self.load_xys_in_idx(xys=solutionPositions, idx=SOL_POS_IDX)    
-    
-        if 'linksNodes' in kwargs:
-            linksNodes = kwargs['linksNodes']
-        else:
-            linksNodes = randomLinks(self.nodesN)
-            
+        self.createNodes(initialPostions, solutionPositions)
         self.createLinks(linksNodes)
         
+    def geomSetting(self, drawingW, drawingH): # to override according GUI
+        print("Number of nodes :", self.nodesN)
+        print("Number of links :", self.linksN)
+        print("Drawing Width Height:", self.drawingW, self.drawingH)
+        print("Drawing Center :", self.centerPos)
+        displayDivSize = 2.0, 2.0
+        return displayDivSize
+        
+    def createNodes(self, initialPostions, solutionPositions=None):
+        for i, (x, y) in enumerate(initialPostions):
+            self.createAndAddNode(i, Position(x, y))
+        if solutionPositions : self.load_xys_in_idx(xys=solutionPositions, idx=SOL_POS_IDX)    
+    
     def createLinks(self, linksNode0idNode1id):
         for i, (n0, n1) in enumerate(linksNode0idNode1id):
             #print("%3d :%3d <->%3d"%(i, n0, n1))
@@ -382,25 +396,25 @@ class Graph:
             node1.addLink(link)        
         
     def __str__(self):
-        s = "Graph %2d, '%s'"%(self.id , self.name)
+        s = "Graph id:%2d, name:'%s'"%(self.id , self.name)
         
-        s += "\n%3d Nodes :"%len(self.nodes)
+        s += "\n%3d Nodes :"%self.nodesN
         for node in self.nodes: s += "\n    %s"%node
         
-        s += "\n%3d Links:"%len(self.links)
+        s += "\n%3d Links:"%self.linksN
         for link in self.links: s += "\n    %s"%link
         
         return s
     
     def createAndAddNode(self, i, xy):
         #print("LG.createAndAddNode")
-        node = Node(self, i, xy)
+        node = self.nodeClass(self, i, xy)
         self.nodes.append(node)
         return node
         
     def createAndAddLink(self, i, node0, node1, name=None):
         #print("LG.createAndAddLink")
-        link = Link(self, i, node0, node1, name=name)
+        link = self.linkClass(self, i, node0, node1, name=name)
         self.links.append(link)
         return link
         
@@ -408,11 +422,10 @@ class Graph:
         for node, (x, y) in zip(self.nodes, xys):
             node.posList[idx] = Position(x, y)
             
-#--------------------------------------- sample ----------------------------------------            
+#--------------------------------------- samples ----------------------------------------            
 sailBoatNodesPos = ((-4.0, 0.0), (0.0, 0.0), (6.0, 0.0), (-2.0, -1.0), (5.0, -1.0), (0.0, 10.0), (-1.0, 1.0), (0.0, 1.0), (5.0, 1.0), (0.0, 8.0))      
 sailBoatlinks    = ((0, 1), (1, 2), (3, 4), (0, 3), (2, 4), (0, 9), (5, 9), (9, 7), (7, 1), (7, 8), (8, 5), (0, 6), (6, 9), (6, 1))     
 
-# ( 9, 4), ( 6, 4), ( 3, 4), (0, 4), (-3, 4), (-6, 4), (-9, 4), (-12, 4)
 busNodesPos = ( (-12, 7), (-9, 7), (-6, 7), (-3, 7), (0, 7), ( 3, 7), ( 6, 7), ( 9, 7), ( 11, 7), ( 12, 4),
                 ( 12, 1), ( 9, 1), ( 8, 0), ( 7, 0), (6, 1), (-6, 1), (-7, 0), (-8, 0), (-9, 1), (-12, 1), (-12, 4),
                 ( 9, 2), ( 8, 3), ( 7, 3), ( 6, 2), (-6, 2), (-7, 3), (-8, 3), (-9, 2),
@@ -450,7 +463,7 @@ if __name__ == "__main__":
             
         quit()
         
-    if 1:    
+    if 0:    
         node = Node(graph=None, id=0, pos=Position(1,0))
         nodes = [node]
         n = 10
@@ -462,9 +475,4 @@ if __name__ == "__main__":
         
     g = Graph(initialPostions=sailBoatNodesPos, linksNodes=sailBoatlinks)
     print("Graph ", g)
-    
-    #g.createNodes()
-    #g.createLinks()
-    
-    
-    
+        
