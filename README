@@ -1,5 +1,5 @@
 
-python untangle_drawing.py
+python GraphTk1.py
 
 Clik and move points until having a drawing without line crossing
 
