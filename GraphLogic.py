@@ -448,7 +448,7 @@ buslinks = (
     (29, 30),(30, 31),(31, 32),(32, 33),(33, 34),(34, 35),(35, 20),( 7, 29),
     ( 6, 30),( 5, 31),( 4, 32),( 3, 33),( 2, 34),( 1, 35),
     )     
-#=======================================================================================
+#===============================================================================
 
 if __name__ == "__main__":
     if 0:
@@ -485,6 +485,8 @@ if __name__ == "__main__":
             print("%3d : %s"%(i, node))
         quit()
         
-    g = Graph(initialPostions=sailBoatNodesPos, linksNodes=sailBoatlinks)
+    from datas import samples
+    drawing = samples[0]    
+    g = Graph(initialPostions=drawing['solxys'], linksNodes=drawing['links'])
     print("Graph ", g)
         

@@ -608,10 +608,14 @@ if __name__ == "__main__":
     root = TK.Tk()
     root.title('untangle_drawing ' + version)
     
-    solutionPositions, linksNodes, initialPostions, n = LG.sailBoatNodesPos, LG.sailBoatlinks, None, None
-    #solutionPositions, linksNodes, initialPostions, n = LG.busNodesPos     , LG.buslinks, None, None
-    #solutionPositions, linksNodes, initialPostions, n = LG.sailBoatNodesPos, None, None, None
-    #solutionPositions, linksNodes, initialPostions, n = None, None, None, 12
-    guiGame = GuiGame(root, solutionPositions=solutionPositions, linksNodes=linksNodes, initialPostions=initialPostions, n=n )
+    from datas import samples
+    
+    drawing = samples[0]    
+    
+    #solutionPositions, linksNodes, initialPostions, n = LG.sailBoatNodesPos, LG.sailBoatlinks, None, None
+    #solutionPositions, linksNodes, initialPostions, n = LG.busNodesPos     , LG.buslinks     , None, None
+    #solutionPositions, linksNodes, initialPostions, n = LG.sailBoatNodesPos, None            , None, None
+    #solutionPositions, linksNodes, initialPostions, n = None               , None            , None, 12
+    guiGame = GuiGame(root, solutionPositions=drawing['solxys'], linksNodes=drawing['links'], initialPostions=drawing['initxys'], n=drawing['nbPts'] )
     
     root.mainloop()
